@@ -118,8 +118,12 @@ export function validateUser(data: unknown): DummyJsonUser {
   const r = data as Record<string, unknown>;
   const id = typeof r.id === 'number' ? r.id : parseInt(String(r.id), 10);
 
-  if (Number.isNaN(id) || id <= 0) {
+  if (!Number.isFinite(id) || id <= 0) {
     throw new ApiError('Invalid user data: missing or malformed numeric ID.', 502, 'MALFORMED_RESPONSE');
+  }
+
+  if (typeof r.username !== 'string' || r.username.trim() === '') {
+    throw new ApiError('Invalid user data: missing or empty username.', 502, 'MALFORMED_RESPONSE');
   }
 
   return {
@@ -127,11 +131,11 @@ export function validateUser(data: unknown): DummyJsonUser {
     firstName: typeof r.firstName === 'string' ? r.firstName.trim() : '',
     lastName: typeof r.lastName === 'string' ? r.lastName.trim() : '',
     maidenName: typeof r.maidenName === 'string' ? r.maidenName.trim() : undefined,
-    age: typeof r.age === 'number' ? r.age : 0,
+    age: typeof r.age === 'number' && Number.isFinite(r.age) && r.age >= 0 ? r.age : 0,
     gender: typeof r.gender === 'string' ? r.gender.trim() : '',
     email: typeof r.email === 'string' ? r.email.trim() : '',
     phone: typeof r.phone === 'string' ? r.phone.trim() : '',
-    username: typeof r.username === 'string' ? r.username.trim() : `user_${id}`,
+    username: r.username.trim(),
     birthDate: typeof r.birthDate === 'string' ? r.birthDate : undefined,
     image: typeof r.image === 'string' ? r.image : '',
     bloodGroup: typeof r.bloodGroup === 'string' ? r.bloodGroup : undefined,
@@ -195,9 +199,23 @@ export function validateUsersResponse(
   }
   const users = r.users.map((u) => validateUser(u));
 
-  const total = typeof r.total === 'number' && r.total >= 0 ? r.total : users.length;
-  const skip = typeof r.skip === 'number' && r.skip >= 0 ? r.skip : fallbackSkip;
-  const limit = typeof r.limit === 'number' && r.limit > 0 ? r.limit : fallbackLimit;
+  const hasTotal = typeof r.total === 'number' && Number.isFinite(r.total) && r.total >= 0;
+  if (!hasTotal && r.total !== undefined) {
+    throw new ApiError('Invalid users listing response: malformed total count.', 502, 'MALFORMED_RESPONSE');
+  }
+  const total = hasTotal ? (r.total as number) : users.length;
+
+  const hasSkip = typeof r.skip === 'number' && Number.isFinite(r.skip) && r.skip >= 0;
+  if (!hasSkip && r.skip !== undefined) {
+    throw new ApiError('Invalid users listing response: malformed skip offset.', 502, 'MALFORMED_RESPONSE');
+  }
+  const skip = hasSkip ? (r.skip as number) : fallbackSkip;
+
+  const hasLimit = typeof r.limit === 'number' && Number.isFinite(r.limit) && r.limit > 0;
+  if (!hasLimit && r.limit !== undefined) {
+    throw new ApiError('Invalid users listing response: malformed limit.', 502, 'MALFORMED_RESPONSE');
+  }
+  const limit = hasLimit ? (r.limit as number) : fallbackLimit;
 
   return { users, total, skip, limit };
 }
@@ -213,26 +231,38 @@ export function validateProduct(data: unknown): DummyJsonProduct {
   const r = data as Record<string, unknown>;
   const id = typeof r.id === 'number' ? r.id : parseInt(String(r.id), 10);
 
-  if (Number.isNaN(id) || id <= 0) {
+  if (!Number.isFinite(id) || id <= 0) {
     throw new ApiError('Invalid product data: missing or malformed numeric ID.', 502, 'MALFORMED_RESPONSE');
   }
 
+  if (typeof r.title !== 'string' || r.title.trim() === '') {
+    throw new ApiError('Invalid product data: missing or empty title.', 502, 'MALFORMED_RESPONSE');
+  }
+
+  if (typeof r.price !== 'number' || !Number.isFinite(r.price) || r.price < 0) {
+    throw new ApiError('Invalid product data: missing or invalid numeric price.', 502, 'MALFORMED_RESPONSE');
+  }
+
+  if (typeof r.category !== 'string' || r.category.trim() === '') {
+    throw new ApiError('Invalid product data: missing or empty category.', 502, 'MALFORMED_RESPONSE');
+  }
+
   const rawImages = Array.isArray(r.images)
-    ? (r.images.filter((img) => typeof img === 'string') as string[])
+    ? (r.images.filter((img) => typeof img === 'string' && img.trim() !== '') as string[])
     : [];
 
   return {
     id,
-    title: typeof r.title === 'string' ? r.title.trim() : `Product #${id}`,
+    title: r.title.trim(),
     description: typeof r.description === 'string' ? r.description.trim() : '',
-    category: typeof r.category === 'string' ? r.category.trim() : '',
-    price: typeof r.price === 'number' && !Number.isNaN(r.price) ? r.price : 0,
+    category: r.category.trim(),
+    price: r.price,
     discountPercentage:
-      typeof r.discountPercentage === 'number' && !Number.isNaN(r.discountPercentage)
+      typeof r.discountPercentage === 'number' && Number.isFinite(r.discountPercentage)
         ? r.discountPercentage
         : 0,
-    rating: typeof r.rating === 'number' && !Number.isNaN(r.rating) ? r.rating : 0,
-    stock: typeof r.stock === 'number' && !Number.isNaN(r.stock) ? r.stock : 0,
+    rating: typeof r.rating === 'number' && Number.isFinite(r.rating) ? r.rating : 0,
+    stock: typeof r.stock === 'number' && Number.isFinite(r.stock) ? r.stock : 0,
     tags: Array.isArray(r.tags) ? (r.tags.filter((t) => typeof t === 'string') as string[]) : undefined,
     brand: typeof r.brand === 'string' ? r.brand.trim() : undefined,
     sku: typeof r.sku === 'string' ? r.sku.trim() : undefined,
@@ -289,9 +319,23 @@ export function validateProductsResponse(
   }
   const products = r.products.map((p) => validateProduct(p));
 
-  const total = typeof r.total === 'number' && r.total >= 0 ? r.total : products.length;
-  const skip = typeof r.skip === 'number' && r.skip >= 0 ? r.skip : fallbackSkip;
-  const limit = typeof r.limit === 'number' && r.limit > 0 ? r.limit : fallbackLimit;
+  const hasTotal = typeof r.total === 'number' && Number.isFinite(r.total) && r.total >= 0;
+  if (!hasTotal && r.total !== undefined) {
+    throw new ApiError('Invalid products listing response: malformed total count.', 502, 'MALFORMED_RESPONSE');
+  }
+  const total = hasTotal ? (r.total as number) : products.length;
+
+  const hasSkip = typeof r.skip === 'number' && Number.isFinite(r.skip) && r.skip >= 0;
+  if (!hasSkip && r.skip !== undefined) {
+    throw new ApiError('Invalid products listing response: malformed skip offset.', 502, 'MALFORMED_RESPONSE');
+  }
+  const skip = hasSkip ? (r.skip as number) : fallbackSkip;
+
+  const hasLimit = typeof r.limit === 'number' && Number.isFinite(r.limit) && r.limit > 0;
+  if (!hasLimit && r.limit !== undefined) {
+    throw new ApiError('Invalid products listing response: malformed limit.', 502, 'MALFORMED_RESPONSE');
+  }
+  const limit = hasLimit ? (r.limit as number) : fallbackLimit;
 
   return { products, total, skip, limit };
 }

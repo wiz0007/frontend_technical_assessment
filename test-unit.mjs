@@ -101,6 +101,20 @@ try {
     assertEqual(actual, c.expected, c.label);
     recordPass(`getSafeCallbackUrl: ${c.label}`);
   }
+
+  // Custom origin / deployed application origin override cases (Requirement S1-01)
+  const customOrigin = 'https://portal.helpstudyabroad.com';
+  const customCases = [
+    { input: `${customOrigin}/dashboard/users`, expected: '/dashboard/users', label: 'Deployed app origin matching internal route' },
+    { input: `${customOrigin}/dashboard/products?category=smartphones`, expected: '/dashboard/products?category=smartphones', label: 'Deployed app origin with query parameters' },
+    { input: 'https://attacker.example/dashboard/users', expected: '/dashboard', label: 'Attacker origin rejected on deployed app' },
+    { input: 'http://localhost:3000/dashboard', expected: '/dashboard', label: 'Localhost rejected when custom production origin configured' },
+  ];
+  for (const c of customCases) {
+    const actual = getSafeCallbackUrl(c.input, '/dashboard', customOrigin);
+    assertEqual(actual, c.expected, `Custom origin: ${c.label}`);
+    recordPass(`getSafeCallbackUrl [custom origin]: ${c.label}`);
+  }
 } catch (err) {
   recordFail('S1-01 Callback URL validation', err);
 }
@@ -163,10 +177,16 @@ try {
   assertTrue(isTokenExpired(baseTime - 100, baseTime), 'Past token is expired');
   recordPass('Past token evaluated as expired');
 
-  // Token with null/missing expiry
+  // Token with null/missing/non-finite expiry
   assertTrue(isTokenExpired(null, baseTime), 'Missing expiry metadata treated as expired');
   assertTrue(isTokenExpired(undefined, baseTime), 'Undefined expiry treated as expired');
-  recordPass('Missing/malformed expiry safely treated as expired');
+  assertTrue(isTokenExpired(0, baseTime), 'Zero expiry treated as expired');
+  assertTrue(isTokenExpired(-100, baseTime), 'Negative expiry treated as expired');
+  assertTrue(isTokenExpired(NaN, baseTime), 'NaN expiry treated as expired');
+  assertTrue(isTokenExpired(Infinity, baseTime), 'Infinity expiry treated as expired');
+  assertTrue(isTokenExpired(-Infinity, baseTime), '-Infinity expiry treated as expired');
+  assertTrue(isTokenExpired('not-a-number', baseTime), 'Non-numeric string expiry treated as expired');
+  recordPass('Missing/malformed/non-finite/infinite expiry safely treated as expired');
 
   // Client-safe user stripping
   const rawUser = {
@@ -202,6 +222,17 @@ try {
   assertEqual(reconciledExpired.error, 'AccessTokenExpired', 'Expired token flagged with AccessTokenExpired');
   assertTrue(reconciledExpired.accessToken === undefined, 'Expired token purges accessToken');
   recordPass('reconcileTokenState flags expired tokens and purges credentials');
+
+  // reconcileTokenState with NaN / Infinite expiry claim
+  const nanJwt = {
+    user: safeUser,
+    accessToken: 'suspicious-token',
+    accessTokenExpires: NaN,
+  };
+  const reconciledNan = reconcileTokenState({ ...nanJwt }, baseTime);
+  assertEqual(reconciledNan.error, 'AccessTokenExpired', 'NaN expiry claim flags token as expired');
+  assertTrue(reconciledNan.accessToken === undefined, 'NaN expiry claim purges access token');
+  recordPass('reconcileTokenState flags non-finite/NaN expiry claims');
 } catch (err) {
   recordFail('S1-03 Token Policy', err);
 }
@@ -249,6 +280,7 @@ try {
   // 2. validateUser
   const validUser = validateUser({
     id: 10,
+    username: 'michaelw',
     firstName: 'Michael',
     lastName: 'Williams',
     age: 28,
@@ -256,8 +288,19 @@ try {
     email: 'michael@example.com',
   });
   assertEqual(validUser.id, 10, 'User ID matches');
+  assertEqual(validUser.username, 'michaelw', 'User username matches');
   assertEqual(validUser.firstName, 'Michael', 'User firstName matches');
   recordPass('validateUser accepts valid user profile');
+
+  let missingUsernameThrew = false;
+  try {
+    validateUser({ id: 11, firstName: 'NoUsername' });
+  } catch (e) {
+    missingUsernameThrew = true;
+    assertTrue(e instanceof ApiError && e.code === 'MALFORMED_RESPONSE', 'Rejects missing username without fabrication');
+  }
+  assertTrue(missingUsernameThrew, 'Rejects user missing username (S1-05 zero fabrication)');
+  recordPass('validateUser strictly rejects missing username without fabrication');
 
   let badUserThrew = false;
   try {
@@ -271,13 +314,26 @@ try {
 
   // 3. validateUsersResponse
   const validUsersList = validateUsersResponse({
-    users: [{ id: 1, firstName: 'A' }, { id: 2, firstName: 'B' }],
+    users: [{ id: 1, username: 'u1', firstName: 'A' }, { id: 2, username: 'u2', firstName: 'B' }],
     total: 2,
     skip: 0,
     limit: 10,
   });
   assertEqual(validUsersList.users.length, 2, 'Parsed 2 users');
   recordPass('validateUsersResponse accepts valid listing');
+
+  let badUsersTotalThrew = false;
+  try {
+    validateUsersResponse({
+      users: [{ id: 1, username: 'u1' }],
+      total: -5,
+    });
+  } catch (e) {
+    badUsersTotalThrew = true;
+    assertTrue(e instanceof ApiError && e.code === 'MALFORMED_RESPONSE', 'Rejects negative total');
+  }
+  assertTrue(badUsersTotalThrew, 'Rejects malformed negative total');
+  recordPass('validateUsersResponse rejects negative or non-finite total');
 
   let missingUsersThrew = false;
   try {
@@ -306,9 +362,39 @@ try {
   assertEqual(validProduct.title, 'Essence Mascara', 'Product title valid');
   recordPass('validateProduct accepts valid product record');
 
+  let missingProductTitleThrew = false;
+  try {
+    validateProduct({ id: 43, category: 'beauty', price: 10 }); // missing title
+  } catch (e) {
+    missingProductTitleThrew = true;
+    assertTrue(e instanceof ApiError && e.code === 'MALFORMED_RESPONSE', 'Rejects missing title without fabrication');
+  }
+  assertTrue(missingProductTitleThrew, 'Rejects product with missing title (S1-05 zero fabrication)');
+  recordPass('validateProduct rejects missing title without fabrication');
+
+  let missingProductPriceThrew = false;
+  try {
+    validateProduct({ id: 44, title: 'Item', category: 'beauty', price: -5 }); // negative price
+  } catch (e) {
+    missingProductPriceThrew = true;
+    assertTrue(e instanceof ApiError && e.code === 'MALFORMED_RESPONSE', 'Rejects negative price');
+  }
+  assertTrue(missingProductPriceThrew, 'Rejects product with negative price');
+  recordPass('validateProduct rejects invalid/negative price');
+
+  let missingProductCategoryThrew = false;
+  try {
+    validateProduct({ id: 45, title: 'Item', category: '', price: 15 }); // empty category
+  } catch (e) {
+    missingProductCategoryThrew = true;
+    assertTrue(e instanceof ApiError && e.code === 'MALFORMED_RESPONSE', 'Rejects empty category');
+  }
+  assertTrue(missingProductCategoryThrew, 'Rejects product with empty category');
+  recordPass('validateProduct rejects missing category');
+
   let badProductThrew = false;
   try {
-    validateProduct({ id: -1, title: 'Negative ID' });
+    validateProduct({ id: -1, title: 'Negative ID', category: 'cat', price: 10 });
   } catch {
     badProductThrew = true;
   }
@@ -317,13 +403,27 @@ try {
 
   // 5. validateProductsResponse
   const validProductsList = validateProductsResponse({
-    products: [{ id: 1, title: 'Item' }],
+    products: [{ id: 1, title: 'Item', category: 'groceries', price: 5 }],
     total: 1,
     skip: 0,
     limit: 12,
   });
   assertEqual(validProductsList.products.length, 1, 'Parsed 1 product');
   recordPass('validateProductsResponse accepts valid products listing');
+
+  let badProdsLimitThrew = false;
+  try {
+    validateProductsResponse({
+      products: [],
+      total: 0,
+      skip: 0,
+      limit: -1,
+    });
+  } catch {
+    badProdsLimitThrew = true;
+  }
+  assertTrue(badProdsLimitThrew, 'Rejects non-positive limit');
+  recordPass('validateProductsResponse rejects non-positive limit');
 
   let missingProdsThrew = false;
   try {

@@ -9,7 +9,8 @@
  * - Upstream tokens are stored exclusively in encrypted server-side JWT cookies.
  * - Sensitive tokens (accessToken, refreshToken) are strictly stripped from client-facing session objects.
  * - No tokens are placed in localStorage, sessionStorage, Zustand, or client cookies.
- * - Expiry timestamps are evaluated deterministically; expired upstream tokens trigger controlled reconciliation.
+ * - Expiry timestamps must be valid finite positive numbers. Missing, zero, negative, NaN,
+ *   or infinite values are strictly treated as expired.
  */
 
 export const DEFAULT_TOKEN_TTL_MINS = 60;
@@ -18,22 +19,30 @@ export const DEFAULT_TOKEN_TTL_MINS = 60;
  * Calculates the epoch expiration timestamp for an upstream token.
  */
 export function calculateTokenExpiresAt(
-  expiresInMins: number = DEFAULT_TOKEN_TTL_MINS,
+  expiresInMins: unknown = DEFAULT_TOKEN_TTL_MINS,
   baseTime: number = Date.now()
 ): number {
-  const safeMins = typeof expiresInMins === 'number' && expiresInMins > 0 ? expiresInMins : DEFAULT_TOKEN_TTL_MINS;
-  return baseTime + safeMins * 60 * 1000;
+  const mins = typeof expiresInMins === 'number' && Number.isFinite(expiresInMins) && expiresInMins > 0
+    ? expiresInMins
+    : DEFAULT_TOKEN_TTL_MINS;
+  return baseTime + mins * 60 * 1000;
 }
 
 /**
  * Determines whether an upstream token has expired relative to a reference time.
+ * Validates that expiresAt is a finite positive number; any missing, zero, negative, NaN,
+ * or infinite value is strictly classified as expired.
  */
 export function isTokenExpired(
-  expiresAt?: number | null,
+  expiresAt?: unknown,
   currentTime: number = Date.now()
 ): boolean {
-  if (typeof expiresAt !== 'number' || Number.isNaN(expiresAt) || expiresAt <= 0) {
-    // Missing or invalid expiry metadata is treated as expired to prevent silent unauthenticated usage
+  if (
+    typeof expiresAt !== 'number' ||
+    !Number.isFinite(expiresAt) ||
+    Number.isNaN(expiresAt) ||
+    expiresAt <= 0
+  ) {
     return true;
   }
   return currentTime >= expiresAt;
@@ -50,33 +59,39 @@ export function createClientSafeUser<T extends Record<string, unknown>>(user: T)
 }
 
 export interface ReconciledJwtResult {
-  accessTokenExpires?: number;
+  accessTokenExpires?: unknown;
+  accessToken?: unknown;
   error?: 'AccessTokenExpired';
   [key: string]: unknown;
 }
 
 /**
  * Evaluates and reconciles server-side NextAuth JWT token state against upstream token expiration.
+ * Any missing or invalid expiry on an upstream token triggers expiration rather than bypassing it.
  */
-export function reconcileTokenState(
-  token: ReconciledJwtResult,
+export function reconcileTokenState<T extends Record<string, unknown>>(
+  token: T,
   currentTime: number = Date.now()
-): ReconciledJwtResult {
-  if (!token) return token;
-
-  // If token is already marked expired, preserve the error state
-  if (token.error === 'AccessTokenExpired') {
+): T {
+  if (!token || typeof token !== 'object') {
     return token;
   }
 
-  // Check expiration if expiry metadata exists
-  if (token.accessTokenExpires && isTokenExpired(token.accessTokenExpires, currentTime)) {
-    return {
-      ...token,
-      error: 'AccessTokenExpired',
-      // Purge cached upstream access token when expired
-      accessToken: undefined,
-    };
+  // Preserve already flagged expiration
+  if ((token as ReconciledJwtResult).error === 'AccessTokenExpired') {
+    return token;
+  }
+
+  // If token has an upstream accessToken or an expiry claim, validate expiry strictly
+  const rec = token as ReconciledJwtResult;
+  if (rec.accessToken !== undefined || rec.accessTokenExpires !== undefined) {
+    if (isTokenExpired(rec.accessTokenExpires, currentTime)) {
+      return {
+        ...token,
+        error: 'AccessTokenExpired',
+        accessToken: undefined,
+      };
+    }
   }
 
   return token;

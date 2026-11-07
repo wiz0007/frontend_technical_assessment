@@ -175,13 +175,14 @@ try {
 try {
   const validUser = validateUser({
     id: 42,
+    username: 'johndoe',
     firstName: 'John',
     lastName: 'Doe',
     age: 30,
     gender: 'male',
     email: 'john@example.com',
   });
-  if (validUser.id === 42 && validUser.firstName === 'John') {
+  if (validUser.id === 42 && validUser.firstName === 'John' && validUser.username === 'johndoe') {
     recordPass('validateUser accepts valid user profile');
   }
 
@@ -198,7 +199,7 @@ try {
 
   let invalidUserIdThrew = false;
   try {
-    validateUser({ id: 0, firstName: 'Zero' });
+    validateUser({ id: 0, username: 'zero', firstName: 'Zero' });
   } catch (e) {
     invalidUserIdThrew = true;
     if (e instanceof ApiError) {
@@ -214,8 +215,8 @@ try {
 try {
   const validUsersList = validateUsersResponse({
     users: [
-      { id: 1, firstName: 'A', lastName: 'B', email: 'a@b.com' },
-      { id: 2, firstName: 'C', lastName: 'D', email: 'c@d.com' },
+      { id: 1, username: 'user1', firstName: 'A', lastName: 'B', email: 'a@b.com' },
+      { id: 2, username: 'user2', firstName: 'C', lastName: 'D', email: 'c@d.com' },
     ],
     total: 2,
     skip: 0,

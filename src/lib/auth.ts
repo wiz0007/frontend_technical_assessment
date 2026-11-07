@@ -78,7 +78,7 @@ export const authOptions: NextAuthOptions = {
       }
 
       // Reconcile upstream token expiration policy using centralized policy
-      return reconcileTokenState(token as unknown as Record<string, unknown>);
+      return reconcileTokenState(token);
     },
     async session({ session, token }) {
       // Invalidate session if upstream token has expired
