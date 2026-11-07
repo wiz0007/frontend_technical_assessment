@@ -54,8 +54,9 @@ export type AuthErrorCode =
 // Notice: Tokens are strictly kept server-side in JWT and NEVER exposed to Session['user']
 declare module 'next-auth' {
   interface Session {
-    user: User;
+    user?: User;
     expires: string;
+    error?: string;
   }
 
   interface User {
@@ -76,6 +77,7 @@ declare module 'next-auth/jwt' {
     user?: User;
     accessToken?: string;
     refreshToken?: string;
+    accessTokenExpires?: number;
     error?: string;
   }
 }

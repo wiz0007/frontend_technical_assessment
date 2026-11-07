@@ -69,6 +69,7 @@ export interface ProductsState {
   isLoadingCategories: boolean;
   isLoadingDetail: boolean;
   error: string | null;
+  categoryError: string | null;
 }
 
 export interface ProductsActions {
@@ -76,7 +77,8 @@ export interface ProductsActions {
   setSelectedCategory: (category: string) => void;
   setPagination: (page: number, limit?: number) => void;
   fetchProducts: () => Promise<void>;
-  fetchCategories: () => Promise<void>;
+  fetchCategories: (force?: boolean) => Promise<void>;
+  clearCategoryError: () => void;
   fetchProductById: (id: number | string) => Promise<void>;
   clearSelectedProduct: () => void;
   clearError: () => void;

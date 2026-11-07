@@ -6,7 +6,13 @@ import {
   fetchProductById as apiFetchProductById,
 } from '@/lib/api';
 
+let activeProductsAbortController: AbortController | null = null;
 let activeProductsRequestId = 0;
+
+let activeProductDetailAbortController: AbortController | null = null;
+let activeProductDetailRequestId = 0;
+
+let activeCategoriesAbortController: AbortController | null = null;
 
 export const useProductsStore = create<ProductsStore>((set, get) => ({
   products: [],
@@ -21,6 +27,7 @@ export const useProductsStore = create<ProductsStore>((set, get) => ({
   isLoadingCategories: false,
   isLoadingDetail: false,
   error: null,
+  categoryError: null,
 
   setSearchQuery: (query: string) => {
     set({ searchQuery: query, skip: 0 });
@@ -36,33 +43,57 @@ export const useProductsStore = create<ProductsStore>((set, get) => ({
     set({ skip: newSkip, limit: currentLimit });
   },
 
-  fetchCategories: async () => {
-    if (get().categories.length > 0) return; // avoid duplicate calls
+  fetchCategories: async (force = false) => {
+    if (get().categories.length > 0 && !force) return; // avoid duplicate calls unless forced
 
-    set({ isLoadingCategories: true });
+    if (activeCategoriesAbortController) {
+      activeCategoriesAbortController.abort();
+    }
+    const controller = new AbortController();
+    activeCategoriesAbortController = controller;
+
+    set({ isLoadingCategories: true, categoryError: null });
     try {
-      const categories = await apiFetchCategories();
-      set({ categories, isLoadingCategories: false });
-    } catch {
-      set({ isLoadingCategories: false });
+      const categories = await apiFetchCategories({ signal: controller.signal });
+      set({ categories, isLoadingCategories: false, categoryError: null });
+    } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return;
+      }
+      const message =
+        err instanceof Error
+          ? err.message
+          : 'Failed to load product categories.';
+      set({ isLoadingCategories: false, categoryError: message });
     }
   },
 
+  clearCategoryError: () => set({ categoryError: null }),
+
   fetchProducts: async () => {
+    if (activeProductsAbortController) {
+      activeProductsAbortController.abort();
+    }
+    const controller = new AbortController();
+    activeProductsAbortController = controller;
+
     const requestId = ++activeProductsRequestId;
     const { limit, skip, searchQuery, selectedCategory } = get();
 
     set({ isLoading: true, error: null });
 
     try {
-      const response = await apiFetchProducts({
-        limit,
-        skip,
-        search: searchQuery,
-        category: selectedCategory,
-      });
+      const response = await apiFetchProducts(
+        {
+          limit,
+          skip,
+          search: searchQuery,
+          category: selectedCategory,
+        },
+        { signal: controller.signal }
+      );
 
-      // Avoid race conditions
+      // Avoid race conditions: only update if this is the latest request
       if (requestId === activeProductsRequestId) {
         set({
           products: response.products,
@@ -72,6 +103,9 @@ export const useProductsStore = create<ProductsStore>((set, get) => ({
         });
       }
     } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return;
+      }
       if (requestId === activeProductsRequestId) {
         const message =
           err instanceof Error
@@ -86,24 +120,38 @@ export const useProductsStore = create<ProductsStore>((set, get) => ({
   },
 
   fetchProductById: async (id: number | string) => {
+    if (activeProductDetailAbortController) {
+      activeProductDetailAbortController.abort();
+    }
+    const controller = new AbortController();
+    activeProductDetailAbortController = controller;
+
+    const requestId = ++activeProductDetailRequestId;
     set({ isLoadingDetail: true, error: null, selectedProduct: null });
 
     try {
-      const product = await apiFetchProductById(id);
-      set({
-        selectedProduct: product,
-        isLoadingDetail: false,
-        error: null,
-      });
+      const product = await apiFetchProductById(id, { signal: controller.signal });
+      if (requestId === activeProductDetailRequestId) {
+        set({
+          selectedProduct: product,
+          isLoadingDetail: false,
+          error: null,
+        });
+      }
     } catch (err: unknown) {
-      const message =
-        err instanceof Error
-          ? err.message
-          : `Failed to load details for product #${id}.`;
-      set({
-        error: message,
-        isLoadingDetail: false,
-      });
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        return;
+      }
+      if (requestId === activeProductDetailRequestId) {
+        const message =
+          err instanceof Error
+            ? err.message
+            : `Failed to load details for product #${id}.`;
+        set({
+          error: message,
+          isLoadingDetail: false,
+        });
+      }
     }
   },
 

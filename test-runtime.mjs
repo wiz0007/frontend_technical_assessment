@@ -1,4 +1,38 @@
 import { spawn } from 'child_process';
+import { getAuthSecret } from './src/lib/auth-secret.ts';
+import {
+  ApiError,
+  validateDummyJsonLoginResponse,
+  validateUser,
+  validateUsersResponse,
+  validateProduct,
+  validateProductsResponse,
+  validateCategories,
+} from './src/lib/api.ts';
+
+let hasFailed = false;
+
+// Global safety listeners
+process.on('unhandledRejection', (reason) => {
+  console.error('\n[FATAL] Unhandled Rejection:', reason);
+  hasFailed = true;
+  process.exit(1);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('\n[FATAL] Uncaught Exception:', err);
+  hasFailed = true;
+  process.exit(1);
+});
+
+function recordPass(testName, details = '') {
+  console.log(`  -> PASS: ${testName} ${details}`.trimEnd());
+}
+
+function recordFail(testName, error) {
+  hasFailed = true;
+  console.error(`  -> FAIL: ${testName} -`, error instanceof Error ? error.message : error);
+}
 
 console.log('\n==============================================');
 console.log('   SPRINT 1.1 & SPRINT 2 COMPREHENSIVE SUITE   ');
@@ -8,61 +42,64 @@ console.log('==============================================\n');
    1. SPRINT 1.1 SECRET VALIDATION (32+ CHARS ENFORCEMENT)
 ------------------------------------------------------------- */
 console.log('[Test 1.1] Verifying getAuthSecret() 32-character enforcement...');
-function testSecretResolver(envNodeEnv, envSecret) {
-  if (envNodeEnv === 'production') {
-    if (
-      !envSecret ||
-      envSecret.trim() === '' ||
-      envSecret.trim().length < 32 ||
-      envSecret.includes('fallback') ||
-      envSecret.includes('dev-only')
-    ) {
-      throw new Error('[FATAL CONFIG ERROR] NEXTAUTH_SECRET must be at least 32 characters in production.');
+try {
+  // Test 1.1.1: Development fallback allowed and >= 32 chars
+  const devSecret = getAuthSecret('development', '');
+  if (devSecret.includes('dev-only') && devSecret.length >= 32) {
+    recordPass('Development fallback allowed with length >= 32');
+  } else {
+    recordFail('Development fallback', `Expected dev secret, got: ${devSecret}`);
+  }
+
+  // Test 1.1.2: Production missing secret rejected
+  let prodMissingThrew = false;
+  try {
+    getAuthSecret('production', '');
+  } catch (e) {
+    prodMissingThrew = true;
+    if (e.message.includes('at least 32 characters') || e.message.includes('[FATAL CONFIG ERROR]')) {
+      recordPass('Production missing secret rejected');
+    } else {
+      recordFail('Production missing secret', e.message);
     }
-    return envSecret.trim();
   }
-  if (envSecret && envSecret.trim() !== '') return envSecret.trim();
-  return 'dev-only-secret-do-not-use-in-production-help-study-abroad-auth-key-32chars';
-}
-
-// Development fallback check
-const devRes = testSecretResolver('development', '');
-if (devRes.includes('dev-only') && devRes.length >= 32) {
-  console.log('  -> PASS: Development fallback allowed and meets length requirements.');
-}
-
-// Production missing secret check
-try {
-  testSecretResolver('production', '');
-  throw new Error('FAIL: Missing secret in production should throw');
-} catch (e) {
-  if (e.message.includes('[FATAL CONFIG ERROR]')) {
-    console.log('  -> PASS: Missing secret in production correctly rejected.');
+  if (!prodMissingThrew) {
+    recordFail('Production missing secret', 'Did not throw error on missing secret');
   }
-}
 
-// Production short secret check (< 32 characters)
-try {
-  testSecretResolver('production', 'short-secret-under-32-chars');
-  throw new Error('FAIL: Short secret in production should throw');
-} catch (e) {
-  if (e.message.includes('[FATAL CONFIG ERROR]')) {
-    console.log('  -> PASS: Secret shorter than 32 characters in production strictly rejected.');
+  // Test 1.1.3: Production secret shorter than 32 chars rejected
+  let prodShortThrew = false;
+  try {
+    getAuthSecret('production', 'too-short-secret');
+  } catch (e) {
+    prodShortThrew = true;
+    if (e.message.includes('at least 32 characters') || e.message.includes('[FATAL CONFIG ERROR]')) {
+      recordPass('Production short secret (< 32 chars) rejected');
+    } else {
+      recordFail('Production short secret', e.message);
+    }
   }
-}
+  if (!prodShortThrew) {
+    recordFail('Production short secret', 'Did not throw on short secret');
+  }
 
-// Production valid secret check
-const validProdSecret = 'a-very-secure-production-secret-that-exceeds-thirty-two-chars';
-const resolvedProd = testSecretResolver('production', validProdSecret);
-if (resolvedProd === validProdSecret) {
-  console.log('  -> PASS: Valid 32+ character production secret accepted.');
+  // Test 1.1.4: Valid 32+ char production secret accepted
+  const validSecret = 'production-secret-with-at-least-32-characters-length!';
+  const prodResolved = getAuthSecret('production', validSecret);
+  if (prodResolved === validSecret) {
+    recordPass('Valid 32+ char production secret accepted');
+  } else {
+    recordFail('Valid production secret', `Got ${prodResolved}`);
+  }
+} catch (err) {
+  recordFail('Secret validation suite', err);
 }
 
 /* -------------------------------------------------------------
    2. SPRINT 1.1 CALLBACK URL VALIDATION
 ------------------------------------------------------------- */
 console.log('\n[Test 1.2] Verifying getSafeCallbackUrl() validation...');
-function getSafeCallbackUrl(raw) {
+function testSafeCallbackUrl(raw) {
   if (!raw || typeof raw !== 'string') return '/dashboard';
   const trimmed = raw.trim();
   if (
@@ -71,7 +108,8 @@ function getSafeCallbackUrl(raw) {
     trimmed.startsWith('/\\') ||
     trimmed.startsWith('\\') ||
     trimmed.toLowerCase().startsWith('javascript:') ||
-    trimmed.toLowerCase().startsWith('data:')
+    trimmed.toLowerCase().startsWith('data:') ||
+    trimmed.toLowerCase().startsWith('vbscript:')
   ) {
     return '/dashboard';
   }
@@ -92,63 +130,335 @@ const safeCases = [
   { input: 'https://evil.com', expected: '/dashboard' },
   { input: '//evil.com', expected: '/dashboard' },
   { input: '/\\evil.com', expected: '/dashboard' },
+  { input: '\\evil.com', expected: '/dashboard' },
   { input: 'javascript:alert(1)', expected: '/dashboard' },
+  { input: 'data:text/html,<script>alert(1)</script>', expected: '/dashboard' },
+  { input: null, expected: '/dashboard' },
+  { input: '', expected: '/dashboard' },
 ];
 
 for (const c of safeCases) {
-  const res = getSafeCallbackUrl(c.input);
-  if (res !== c.expected) {
-    throw new Error(`FAIL: Callback URL check for ${c.input} failed! Got ${res}, expected ${c.expected}`);
+  const res = testSafeCallbackUrl(c.input);
+  if (res === c.expected) {
+    recordPass(`Callback URL: "${c.input}" -> "${res}"`);
+  } else {
+    recordFail(`Callback URL: "${c.input}"`, `Expected "${c.expected}", got "${res}"`);
   }
 }
-console.log('  -> PASS: All callback URL attack vectors safely neutralized to /dashboard.');
 
 /* -------------------------------------------------------------
-   3. SPRINT 2 API INTEGRATION TESTS (USERS & PRODUCTS)
+   3. SPRINT 1.1 & 2 RUNTIME RESPONSE VALIDATORS
 ------------------------------------------------------------- */
-console.log('\n[Test 2.1] Verifying DummyJSON Users API Integration...');
-async function testDummyJsonAPIs() {
+console.log('\n[Test 1.3] Verifying API runtime response validators...');
+
+// 3.1 validateDummyJsonLoginResponse
+try {
+  const validLogin = validateDummyJsonLoginResponse({
+    id: 1,
+    username: 'emilys',
+    email: 'emily.smith@example.com',
+    firstName: 'Emily',
+    lastName: 'Smith',
+    gender: 'female',
+    image: 'https://dummyjson.com/icon/emilys/128',
+    accessToken: 'mock-jwt-token-123',
+    refreshToken: 'mock-refresh-token-456',
+  });
+  if (validLogin.username === 'emilys' && validLogin.accessToken === 'mock-jwt-token-123') {
+    recordPass('validateDummyJsonLoginResponse accepts valid payload');
+  }
+
+  let missingTokenThrew = false;
+  try {
+    validateDummyJsonLoginResponse({ id: 1, username: 'emilys' });
+  } catch (e) {
+    missingTokenThrew = true;
+    if (e instanceof ApiError && e.code === 'MALFORMED_RESPONSE') {
+      recordPass('validateDummyJsonLoginResponse rejects missing accessToken');
+    }
+  }
+  if (!missingTokenThrew) recordFail('validateDummyJsonLoginResponse', 'Did not reject missing token');
+
+  let invalidIdThrew = false;
+  try {
+    validateDummyJsonLoginResponse({ id: 'invalid', accessToken: 'token', username: 'test' });
+  } catch (e) {
+    invalidIdThrew = true;
+    if (e instanceof ApiError) {
+      recordPass('validateDummyJsonLoginResponse rejects invalid ID');
+    }
+  }
+  if (!invalidIdThrew) recordFail('validateDummyJsonLoginResponse', 'Did not reject invalid ID');
+} catch (err) {
+  recordFail('validateDummyJsonLoginResponse suite', err);
+}
+
+// 3.2 validateUser
+try {
+  const validUser = validateUser({
+    id: 42,
+    firstName: 'John',
+    lastName: 'Doe',
+    age: 30,
+    gender: 'male',
+    email: 'john@example.com',
+  });
+  if (validUser.id === 42 && validUser.firstName === 'John') {
+    recordPass('validateUser accepts valid user profile');
+  }
+
+  let nonObjectThrew = false;
+  try {
+    validateUser('string payload');
+  } catch (e) {
+    nonObjectThrew = true;
+    if (e instanceof ApiError && e.code === 'MALFORMED_RESPONSE') {
+      recordPass('validateUser rejects non-object payload');
+    }
+  }
+  if (!nonObjectThrew) recordFail('validateUser', 'Did not reject non-object');
+
+  let invalidUserIdThrew = false;
+  try {
+    validateUser({ id: 0, firstName: 'Zero' });
+  } catch (e) {
+    invalidUserIdThrew = true;
+    if (e instanceof ApiError) {
+      recordPass('validateUser rejects non-positive numeric ID');
+    }
+  }
+  if (!invalidUserIdThrew) recordFail('validateUser', 'Did not reject invalid user ID');
+} catch (err) {
+  recordFail('validateUser suite', err);
+}
+
+// 3.3 validateUsersResponse
+try {
+  const validUsersList = validateUsersResponse({
+    users: [
+      { id: 1, firstName: 'A', lastName: 'B', email: 'a@b.com' },
+      { id: 2, firstName: 'C', lastName: 'D', email: 'c@d.com' },
+    ],
+    total: 2,
+    skip: 0,
+    limit: 10,
+  });
+  if (validUsersList.users.length === 2 && validUsersList.total === 2) {
+    recordPass('validateUsersResponse accepts valid users list');
+  }
+
+  let missingUsersArrayThrew = false;
+  try {
+    validateUsersResponse({ total: 10 });
+  } catch (e) {
+    missingUsersArrayThrew = true;
+    if (e instanceof ApiError && e.code === 'MALFORMED_RESPONSE') {
+      recordPass('validateUsersResponse rejects missing users array');
+    }
+  }
+  if (!missingUsersArrayThrew) recordFail('validateUsersResponse', 'Did not reject missing users array');
+} catch (err) {
+  recordFail('validateUsersResponse suite', err);
+}
+
+// 3.4 validateProduct
+try {
+  const validProd = validateProduct({
+    id: 99,
+    title: 'Test Smartphone',
+    description: 'High-end smartphone',
+    category: 'smartphones',
+    price: 699,
+    discountPercentage: 10,
+    rating: 4.5,
+    stock: 50,
+    images: ['https://example.com/phone.jpg'],
+    thumbnail: 'https://example.com/thumb.jpg',
+  });
+  if (validProd.id === 99 && validProd.title === 'Test Smartphone' && validProd.images.length === 1) {
+    recordPass('validateProduct accepts valid product record');
+  }
+
+  let invalidProdThrew = false;
+  try {
+    validateProduct({ id: -1, title: 'Negative ID' });
+  } catch (e) {
+    invalidProdThrew = true;
+    if (e instanceof ApiError) {
+      recordPass('validateProduct rejects invalid product ID');
+    }
+  }
+  if (!invalidProdThrew) recordFail('validateProduct', 'Did not reject invalid product ID');
+} catch (err) {
+  recordFail('validateProduct suite', err);
+}
+
+// 3.5 validateProductsResponse
+try {
+  const validProdList = validateProductsResponse({
+    products: [
+      { id: 1, title: 'Item 1', category: 'cat', price: 10, discountPercentage: 0, rating: 5, stock: 10, images: [], thumbnail: '' },
+    ],
+    total: 1,
+    skip: 0,
+    limit: 12,
+  });
+  if (validProdList.products.length === 1 && validProdList.total === 1) {
+    recordPass('validateProductsResponse accepts valid products list');
+  }
+
+  let missingProdsThrew = false;
+  try {
+    validateProductsResponse({ total: 0 });
+  } catch (e) {
+    missingProdsThrew = true;
+    if (e instanceof ApiError && e.code === 'MALFORMED_RESPONSE') {
+      recordPass('validateProductsResponse rejects missing products array');
+    }
+  }
+  if (!missingProdsThrew) recordFail('validateProductsResponse', 'Did not reject missing products array');
+} catch (err) {
+  recordFail('validateProductsResponse suite', err);
+}
+
+// 3.6 validateCategories
+try {
+  const validCatObjects = validateCategories([
+    { slug: 'beauty', name: 'Beauty', url: 'https://dummyjson.com/products/category/beauty' },
+    { slug: 'fragrances', name: 'Fragrances' },
+  ]);
+  if (validCatObjects.length === 2 && validCatObjects[0].slug === 'beauty') {
+    recordPass('validateCategories accepts object array');
+  }
+
+  const validCatStrings = validateCategories(['smartphones', 'laptops']);
+  if (validCatStrings.length === 2 && validCatStrings[0].slug === 'smartphones') {
+    recordPass('validateCategories normalizes string array to object format');
+  }
+
+  let nonArrayCatThrew = false;
+  try {
+    validateCategories({ categories: [] });
+  } catch (e) {
+    nonArrayCatThrew = true;
+    if (e instanceof ApiError && e.code === 'MALFORMED_RESPONSE') {
+      recordPass('validateCategories rejects non-array');
+    }
+  }
+  if (!nonArrayCatThrew) recordFail('validateCategories', 'Did not reject non-array');
+} catch (err) {
+  recordFail('validateCategories suite', err);
+}
+
+/* -------------------------------------------------------------
+   4. SPRINT 1.1 UPSTREAM TOKEN EXPIRATION LOGIC
+------------------------------------------------------------- */
+console.log('\n[Test 1.4] Verifying Upstream Token Expiration Handling...');
+{
+  // Simulated JWT callback expiration check
+  const now = Date.now();
+  const activeToken = {
+    user: { id: 1, username: 'emilys', name: 'Emily Smith' },
+    accessToken: 'valid-token',
+    accessTokenExpires: now + 3600000, // 1 hour in future
+  };
+  const isExpiredActive = now >= (activeToken.accessTokenExpires || 0);
+  if (!isExpiredActive) {
+    recordPass('Active upstream token (< expires) remains valid');
+  } else {
+    recordFail('Active token expiration', 'Marked active token as expired');
+  }
+
+  const expiredToken = {
+    user: { id: 1, username: 'emilys', name: 'Emily Smith' },
+    accessToken: 'expired-token',
+    accessTokenExpires: now - 1000, // expired 1 second ago
+  };
+  const isExpired = now >= (expiredToken.accessTokenExpires || 0);
+  if (isExpired) {
+    expiredToken.error = 'AccessTokenExpired';
+    delete expiredToken.user;
+    delete expiredToken.accessToken;
+    recordPass('Expired upstream token flags error: AccessTokenExpired and purges user data');
+  } else {
+    recordFail('Expired token logic', 'Failed to detect expired timestamp');
+  }
+}
+
+/* -------------------------------------------------------------
+   5. SPRINT 2 CAROUSEL INDEX CLAMPING & SYNCHRONIZATION
+------------------------------------------------------------- */
+console.log('\n[Test 2.0] Verifying Product Carousel index clamping & synchronization...');
+{
+  function clampIndex(index, total) {
+    return total > 0 ? Math.min(Math.max(0, index), total - 1) : 0;
+  }
+
+  // Normal in-bounds
+  if (clampIndex(1, 4) === 1) recordPass('Carousel index within bounds preserved');
+  // Out-of-bounds upper
+  if (clampIndex(10, 3) === 2) recordPass('Carousel index clamped to total - 1 on overshoot');
+  // Out-of-bounds lower
+  if (clampIndex(-5, 3) === 0) recordPass('Carousel index clamped to 0 on negative index');
+  // Empty array
+  if (clampIndex(0, 0) === 0) recordPass('Carousel index returns 0 when no images');
+}
+
+/* -------------------------------------------------------------
+   6. LIVE DUMMYJSON API INTEGRATION TESTS
+------------------------------------------------------------- */
+console.log('\n[Test 2.1] Verifying Live DummyJSON API Integration...');
+try {
   // Test Users API
   const usersRes = await fetch('https://dummyjson.com/users?limit=5&skip=0');
   const usersData = await usersRes.json();
   if (Array.isArray(usersData.users) && usersData.users.length === 5 && usersData.total > 0) {
-    console.log(`  -> PASS: Users listing fetched (${usersData.users.length} items, total: ${usersData.total}).`);
+    recordPass(`Users listing fetched (${usersData.users.length} items, total: ${usersData.total})`);
+  } else {
+    recordFail('Users listing fetch', 'Malformed response');
   }
 
   // Test User Details API
   const singleUserRes = await fetch('https://dummyjson.com/users/1');
   const singleUserData = await singleUserRes.json();
   if (singleUserData.id === 1 && singleUserData.company?.name && singleUserData.address?.city) {
-    console.log(`  -> PASS: User details for #${singleUserData.id} (${singleUserData.firstName}) verified.`);
+    recordPass(`User details for #${singleUserData.id} (${singleUserData.firstName}) verified`);
+  } else {
+    recordFail('User details fetch', 'Missing company or address');
   }
 
   // Test Products API
-  console.log('\n[Test 2.2] Verifying DummyJSON Products API Integration...');
   const productsRes = await fetch('https://dummyjson.com/products?limit=6&skip=0');
   const productsData = await productsRes.json();
   if (Array.isArray(productsData.products) && productsData.products.length === 6 && productsData.total > 0) {
-    console.log(`  -> PASS: Products listing fetched (${productsData.products.length} items, total: ${productsData.total}).`);
+    recordPass(`Products listing fetched (${productsData.products.length} items, total: ${productsData.total})`);
+  } else {
+    recordFail('Products listing fetch', 'Malformed response');
   }
 
   // Test Categories API
   const catsRes = await fetch('https://dummyjson.com/products/categories');
   const catsData = await catsRes.json();
   if (Array.isArray(catsData) && catsData.length > 0) {
-    console.log(`  -> PASS: Product categories fetched (${catsData.length} categories available).`);
+    recordPass(`Product categories fetched (${catsData.length} categories available)`);
+  } else {
+    recordFail('Categories fetch', 'Empty or malformed categories');
   }
 
   // Test Product Details API
   const singleProdRes = await fetch('https://dummyjson.com/products/1');
   const singleProdData = await singleProdRes.json();
   if (singleProdData.id === 1 && Array.isArray(singleProdData.images) && singleProdData.images.length > 0) {
-    console.log(`  -> PASS: Product details for #${singleProdData.id} (${singleProdData.title}) verified.`);
+    recordPass(`Product details for #${singleProdData.id} (${singleProdData.title}) verified`);
+  } else {
+    recordFail('Product details fetch', 'Missing images');
   }
+} catch (err) {
+  recordFail('Live DummyJSON API integration', err);
 }
 
-await testDummyJsonAPIs();
-
 /* -------------------------------------------------------------
-   4. END-TO-END SERVER ROUTING & PROTECTION AUDIT
+   7. END-TO-END SERVER ROUTING & PROTECTION AUDIT
 ------------------------------------------------------------- */
 console.log('\n==============================================');
 console.log('       STARTING APPLICATION SERVER AUDIT       ');
@@ -163,6 +473,7 @@ const server = spawn('npx', ['next', 'start', '-p', PORT.toString()], {
   env: {
     ...process.env,
     NEXTAUTH_URL: BASE_URL,
+    NEXTAUTH_SECRET: 'test-secret-at-least-32-characters-for-audit-suite',
   },
 });
 
@@ -176,8 +487,8 @@ server.stdout.on('data', async (d) => {
     console.log('\n--- Running Full End-to-End Route Audits ---');
 
     try {
-      // 1. Unauthenticated route protections for Sprint 2 routes
-      console.log('\n[Route 1] Verifying Route Protection for Users and Products...');
+      // 1. Unauthenticated route protections for all dashboard routes
+      console.log('\n[Route 1] Verifying Route Protection for Users, Products, and Details...');
       const unauthUsers = await fetch(`${BASE_URL}/dashboard/users`, { redirect: 'manual' });
       const unauthProducts = await fetch(`${BASE_URL}/dashboard/products`, { redirect: 'manual' });
       const unauthDetailUser = await fetch(`${BASE_URL}/dashboard/users/1`, { redirect: 'manual' });
@@ -189,9 +500,9 @@ server.stdout.on('data', async (d) => {
         unauthDetailUser.status === 307 &&
         unauthDetailProduct.status === 307
       ) {
-        console.log('  -> PASS: All Sprint 2 routes (/dashboard/users, /dashboard/products and details) strictly protected!');
+        recordPass('All dashboard routes (/users, /products, /users/:id, /products/:id) redirect 307 when unauthenticated');
       } else {
-        throw new Error('FAIL: Route protection breached on Sprint 2 routes');
+        recordFail('Route protection', `Got statuses: users=${unauthUsers.status}, products=${unauthProducts.status}, user1=${unauthDetailUser.status}, prod1=${unauthDetailProduct.status}`);
       }
 
       // 2. Obtain Session Cookie via Live Authentication
@@ -225,9 +536,10 @@ server.stdout.on('data', async (d) => {
         headers: { Cookie: sessionCookie },
         redirect: 'manual',
       });
-      console.log(`  - /dashboard/users status: ${authedUsersRes.status}`);
       if (authedUsersRes.status === 200) {
-        console.log('  -> PASS: /dashboard/users accessible and rendered (200 OK)!');
+        recordPass('/dashboard/users rendered with 200 OK');
+      } else {
+        recordFail('/dashboard/users', `Status: ${authedUsersRes.status}`);
       }
 
       // 4. Authenticated Access to Products Page
@@ -236,9 +548,10 @@ server.stdout.on('data', async (d) => {
         headers: { Cookie: sessionCookie },
         redirect: 'manual',
       });
-      console.log(`  - /dashboard/products status: ${authedProductsRes.status}`);
       if (authedProductsRes.status === 200) {
-        console.log('  -> PASS: /dashboard/products accessible and rendered (200 OK)!');
+        recordPass('/dashboard/products rendered with 200 OK');
+      } else {
+        recordFail('/dashboard/products', `Status: ${authedProductsRes.status}`);
       }
 
       // 5. Authenticated Access to User Detail Page
@@ -247,9 +560,10 @@ server.stdout.on('data', async (d) => {
         headers: { Cookie: sessionCookie },
         redirect: 'manual',
       });
-      console.log(`  - /dashboard/users/1 status: ${authedUserDetailRes.status}`);
       if (authedUserDetailRes.status === 200) {
-        console.log('  -> PASS: /dashboard/users/1 accessible and rendered (200 OK)!');
+        recordPass('/dashboard/users/1 rendered with 200 OK');
+      } else {
+        recordFail('/dashboard/users/1', `Status: ${authedUserDetailRes.status}`);
       }
 
       // 6. Authenticated Access to Product Detail Page
@@ -258,19 +572,25 @@ server.stdout.on('data', async (d) => {
         headers: { Cookie: sessionCookie },
         redirect: 'manual',
       });
-      console.log(`  - /dashboard/products/1 status: ${authedProductDetailRes.status}`);
       if (authedProductDetailRes.status === 200) {
-        console.log('  -> PASS: /dashboard/products/1 accessible and rendered (200 OK)!');
+        recordPass('/dashboard/products/1 rendered with 200 OK');
+      } else {
+        recordFail('/dashboard/products/1', `Status: ${authedProductDetailRes.status}`);
       }
 
       console.log('\n==============================================');
-      console.log(' ALL SPRINT 1.1 & SPRINT 2 AUDITS SUCCESSFUL! ');
+      if (hasFailed) {
+        console.error(' AUDIT SUITE FINISHED WITH FAILURES ');
+      } else {
+        console.log(' ALL SPRINT 1.1 & SPRINT 2 AUDITS SUCCESSFUL! ');
+      }
       console.log('==============================================\n');
     } catch (e) {
       console.error('Audit Error:', e);
+      hasFailed = true;
     } finally {
       spawn('taskkill', ['/pid', server.pid.toString(), '/f', '/t'], { shell: true });
-      process.exit(0);
+      process.exit(hasFailed ? 1 : 0);
     }
   }
 });

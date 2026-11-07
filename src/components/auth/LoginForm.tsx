@@ -189,8 +189,18 @@ export function LoginForm() {
       }
 
       if (result.ok) {
-        // Safe redirect
-        router.push(safeCallbackUrl);
+        // Perform authoritative navigation to flush client router cache
+        try {
+          window.location.assign(safeCallbackUrl);
+        } catch {
+          router.push(safeCallbackUrl);
+        }
+
+        // Safety timeout ensures loading state cannot remain permanently active
+        // if browser navigation stalls or encounters an error
+        setTimeout(() => {
+          setIsLoading(false);
+        }, 4000);
       } else {
         setIsLoading(false);
       }

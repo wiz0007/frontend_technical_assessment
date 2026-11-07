@@ -14,7 +14,7 @@ export async function middleware(request: NextRequest) {
     secret,
   });
 
-  const isAuthenticated = Boolean(token);
+  const isAuthenticated = Boolean(token && !token.error && token.user);
   const isDashboardRoute = pathname.startsWith('/dashboard');
   const isLoginRoute = pathname === '/login';
 

@@ -2,7 +2,11 @@ import { create } from 'zustand';
 import { UsersStore } from '@/types/users';
 import { fetchUsers as apiFetchUsers, fetchUserById as apiFetchUserById } from '@/lib/api';
 
+let activeUsersAbortController: AbortController | null = null;
 let activeUsersRequestId = 0;
+
+let activeUserDetailAbortController: AbortController | null = null;
+let activeUserDetailRequestId = 0;
 
 export const useUsersStore = create<UsersStore>((set, get) => ({
   users: [],
@@ -27,17 +31,26 @@ export const useUsersStore = create<UsersStore>((set, get) => ({
   },
 
   fetchUsers: async () => {
+    if (activeUsersAbortController) {
+      activeUsersAbortController.abort();
+    }
+    const controller = new AbortController();
+    activeUsersAbortController = controller;
+
     const requestId = ++activeUsersRequestId;
     const { limit, skip, searchQuery } = get();
 
     set({ isLoading: true, error: null });
 
     try {
-      const response = await apiFetchUsers({
-        limit,
-        skip,
-        search: searchQuery,
-      });
+      const response = await apiFetchUsers(
+        {
+          limit,
+          skip,
+          search: searchQuery,
+        },
+        { signal: controller.signal }
+      );
 
       // Avoid race conditions: only update if this is the latest request
       if (requestId === activeUsersRequestId) {
@@ -49,6 +62,10 @@ export const useUsersStore = create<UsersStore>((set, get) => ({
         });
       }
     } catch (err: unknown) {
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        // Request was intentionally superseded; discard cleanly
+        return;
+      }
       if (requestId === activeUsersRequestId) {
         const message =
           err instanceof Error
@@ -63,24 +80,39 @@ export const useUsersStore = create<UsersStore>((set, get) => ({
   },
 
   fetchUserById: async (id: number | string) => {
+    if (activeUserDetailAbortController) {
+      activeUserDetailAbortController.abort();
+    }
+    const controller = new AbortController();
+    activeUserDetailAbortController = controller;
+
+    const requestId = ++activeUserDetailRequestId;
     set({ isLoadingDetail: true, error: null, selectedUser: null });
 
     try {
-      const user = await apiFetchUserById(id);
-      set({
-        selectedUser: user,
-        isLoadingDetail: false,
-        error: null,
-      });
+      const user = await apiFetchUserById(id, { signal: controller.signal });
+      if (requestId === activeUserDetailRequestId) {
+        set({
+          selectedUser: user,
+          isLoadingDetail: false,
+          error: null,
+        });
+      }
     } catch (err: unknown) {
-      const message =
-        err instanceof Error
-          ? err.message
-          : `Failed to load details for user #${id}.`;
-      set({
-        error: message,
-        isLoadingDetail: false,
-      });
+      if (err instanceof DOMException && err.name === 'AbortError') {
+        // Request superseded by newer user navigation; do not overwrite UI state
+        return;
+      }
+      if (requestId === activeUserDetailRequestId) {
+        const message =
+          err instanceof Error
+            ? err.message
+            : `Failed to load details for user #${id}.`;
+        set({
+          error: message,
+          isLoadingDetail: false,
+        });
+      }
     }
   },
 

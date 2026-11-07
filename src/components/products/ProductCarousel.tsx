@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Box from '@mui/material/Box';
 import IconButton from '@mui/material/IconButton';
 import Typography from '@mui/material/Typography';
@@ -16,9 +16,20 @@ interface ProductCarouselProps {
 export function ProductCarousel({ images = [], title }: ProductCarouselProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [hasError, setHasError] = useState(false);
+  const [thumbnailErrors, setThumbnailErrors] = useState<Record<number, boolean>>({});
 
   const cleanImages = Array.isArray(images) ? images.filter((img) => Boolean(img)) : [];
   const total = cleanImages.length;
+
+  // Requirement 5.3: Reset state when product or image list changes
+  useEffect(() => {
+    setCurrentIndex(0);
+    setHasError(false);
+    setThumbnailErrors({});
+  }, [images]);
+
+  // Clamp current index to valid bounds
+  const safeIndex = total > 0 ? Math.min(Math.max(0, currentIndex), total - 1) : 0;
 
   const handlePrev = () => {
     setCurrentIndex((prev) => (prev === 0 ? total - 1 : prev - 1));
@@ -33,6 +44,10 @@ export function ProductCarousel({ images = [], title }: ProductCarouselProps) {
   const handleSelectThumbnail = (index: number) => {
     setCurrentIndex(index);
     setHasError(false);
+  };
+
+  const handleThumbnailError = (index: number) => {
+    setThumbnailErrors((prev) => ({ ...prev, [index]: true }));
   };
 
   if (total === 0) {
@@ -58,7 +73,7 @@ export function ProductCarousel({ images = [], title }: ProductCarouselProps) {
     );
   }
 
-  const currentImage = cleanImages[currentIndex];
+  const currentImage = cleanImages[safeIndex];
 
   return (
     <Box sx={{ width: '100%' }}>
@@ -88,7 +103,7 @@ export function ProductCarousel({ images = [], title }: ProductCarouselProps) {
           <Box
             component="img"
             src={currentImage}
-            alt={`${title} - image ${currentIndex + 1} of ${total}`}
+            alt={`${title} - image ${safeIndex + 1} of ${total}`}
             onError={() => setHasError(true)}
             sx={{
               maxWidth: '100%',
@@ -155,7 +170,7 @@ export function ProductCarousel({ images = [], title }: ProductCarouselProps) {
               fontWeight: 600,
             }}
           >
-            {currentIndex + 1} / {total}
+            {safeIndex + 1} / {total}
           </Box>
         )}
       </Box>
@@ -174,7 +189,7 @@ export function ProductCarousel({ images = [], title }: ProductCarouselProps) {
           }}
         >
           {cleanImages.map((img, idx) => {
-            const isSelected = idx === currentIndex;
+            const isSelected = idx === safeIndex;
             return (
               <Box
                 key={idx}
@@ -200,16 +215,21 @@ export function ProductCarousel({ images = [], title }: ProductCarouselProps) {
                   },
                 }}
               >
-                <Box
-                  component="img"
-                  src={img}
-                  alt={`Thumbnail ${idx + 1}`}
-                  sx={{
-                    maxWidth: '100%',
-                    maxHeight: '100%',
-                    objectFit: 'contain',
-                  }}
-                />
+                {thumbnailErrors[idx] ? (
+                  <BrokenImageIcon sx={{ fontSize: 24, opacity: 0.5 }} />
+                ) : (
+                  <Box
+                    component="img"
+                    src={img}
+                    alt={`Thumbnail ${idx + 1}`}
+                    onError={() => handleThumbnailError(idx)}
+                    sx={{
+                      maxWidth: '100%',
+                      maxHeight: '100%',
+                      objectFit: 'contain',
+                    }}
+                  />
+                )}
               </Box>
             );
           })}

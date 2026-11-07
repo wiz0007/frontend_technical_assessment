@@ -30,7 +30,7 @@ function AuthSync({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    if (status === 'authenticated' && session?.user) {
+    if (status === 'authenticated' && session?.user && !session.error) {
       const currentUserId = current.user?.id;
       const nextUserId = session.user.id;
 
@@ -49,7 +49,7 @@ function AuthSync({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    if (status === 'unauthenticated') {
+    if (status === 'unauthenticated' || session?.error === 'AccessTokenExpired' || !session?.user) {
       if (current.isAuthenticated || current.user !== null || current.isLoading) {
         clearAuthState();
       }

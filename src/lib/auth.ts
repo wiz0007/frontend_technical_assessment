@@ -72,12 +72,31 @@ export const authOptions: NextAuthOptions = {
         };
         token.accessToken = user.accessToken;
         token.refreshToken = user.refreshToken;
+        // Upstream token expires in 60 minutes
+        token.accessTokenExpires = Date.now() + 60 * 60 * 1000;
+        token.error = undefined;
       }
+
+      // Reconcile upstream token expiration policy
+      if (token.accessTokenExpires && Date.now() > (token.accessTokenExpires as number)) {
+        return {
+          ...token,
+          error: 'AccessTokenExpired',
+        };
+      }
+
       return token;
     },
     async session({ session, token }) {
+      // Invalidate session if upstream token has expired
+      if (token?.error === 'AccessTokenExpired') {
+        session.user = undefined;
+        session.error = 'AccessTokenExpired';
+        return session;
+      }
+
       if (token?.user) {
-        // CORRECTION 2: Only non-sensitive user profile data is exposed to client-accessible session.
+        // Only non-sensitive user profile data is exposed to client-accessible session.
         // Tokens (accessToken, refreshToken) are strictly excluded.
         session.user = {
           id: token.user.id,

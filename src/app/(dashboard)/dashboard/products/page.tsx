@@ -17,6 +17,7 @@ import Chip from '@mui/material/Chip';
 import Rating from '@mui/material/Rating';
 import Skeleton from '@mui/material/Skeleton';
 import TablePagination from '@mui/material/TablePagination';
+import Alert from '@mui/material/Alert';
 import SearchIcon from '@mui/icons-material/Search';
 import ClearIcon from '@mui/icons-material/Clear';
 import RefreshIcon from '@mui/icons-material/Refresh';
@@ -37,6 +38,7 @@ export default function ProductsPage() {
   const isLoading = useProductsStore((s) => s.isLoading);
   const isLoadingCategories = useProductsStore((s) => s.isLoadingCategories);
   const error = useProductsStore((s) => s.error);
+  const categoryError = useProductsStore((s) => s.categoryError);
 
   const setSearchQuery = useProductsStore((s) => s.setSearchQuery);
   const setSelectedCategory = useProductsStore((s) => s.setSelectedCategory);
@@ -119,6 +121,26 @@ export default function ProductsPage() {
           Refresh
         </Button>
       </Box>
+
+      {/* Category Error Alert with Retry */}
+      {categoryError && (
+        <Alert
+          severity="warning"
+          sx={{ mb: 3 }}
+          action={
+            <Button
+              color="inherit"
+              size="small"
+              onClick={() => fetchCategories(true)}
+              disabled={isLoadingCategories}
+            >
+              Retry
+            </Button>
+          }
+        >
+          {categoryError}
+        </Alert>
+      )}
 
       {/* Filter & Search Bar */}
       <Card elevation={0} sx={{ p: 2, mb: 3 }}>

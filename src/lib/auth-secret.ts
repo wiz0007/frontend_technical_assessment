@@ -4,10 +4,13 @@
  * and must be at least 32 characters long.
  * In development/test, a guarded dev fallback is used only if NEXTAUTH_SECRET is not set.
  */
-export function getAuthSecret(): string {
-  const secret = process.env.NEXTAUTH_SECRET;
+export function getAuthSecret(
+  envNodeEnv: string = process.env.NODE_ENV || 'development',
+  envSecret: string | undefined = process.env.NEXTAUTH_SECRET
+): string {
+  const secret = envSecret;
 
-  if (process.env.NODE_ENV === 'production') {
+  if (envNodeEnv === 'production') {
     if (
       !secret ||
       secret.trim() === '' ||
