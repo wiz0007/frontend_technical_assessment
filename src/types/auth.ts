@@ -35,7 +35,6 @@ export interface AuthState {
 
 export interface AuthActions {
   setAuthState: (isAuthenticated: boolean, user: User | null) => void;
-  setUser: (user: User | null) => void;
   clearAuthState: () => void;
   setLoading: (isLoading: boolean) => void;
   setError: (error: string | null) => void;

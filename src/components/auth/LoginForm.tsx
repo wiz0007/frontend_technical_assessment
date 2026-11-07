@@ -21,8 +21,50 @@ import LockOutlinedIcon from '@mui/icons-material/LockOutlined';
 import PersonOutlineIcon from '@mui/icons-material/PersonOutline';
 
 /**
+ * Validates and sanitizes callback URLs to prevent open redirects, protocol-relative attacks,
+ * and dangerous URI schemes.
+ */
+export function getSafeCallbackUrl(raw: string | null): string {
+  if (!raw || typeof raw !== 'string') {
+    return '/dashboard';
+  }
+
+  const trimmed = raw.trim();
+
+  // Reject empty, protocol-relative, backslash-based, or dangerous schemes
+  if (
+    trimmed === '' ||
+    trimmed.startsWith('//') ||
+    trimmed.startsWith('/\\') ||
+    trimmed.startsWith('\\') ||
+    trimmed.toLowerCase().startsWith('javascript:') ||
+    trimmed.toLowerCase().startsWith('data:') ||
+    trimmed.toLowerCase().startsWith('vbscript:')
+  ) {
+    return '/dashboard';
+  }
+
+  try {
+    const parsed = new URL(trimmed, 'http://localhost');
+
+    // Must be same origin
+    if (parsed.origin !== 'http://localhost') {
+      return '/dashboard';
+    }
+
+    // Must start with a single slash
+    if (!parsed.pathname.startsWith('/') || parsed.pathname.startsWith('//')) {
+      return '/dashboard';
+    }
+
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  } catch {
+    return '/dashboard';
+  }
+}
+
+/**
  * Standardized user-facing error message mapping.
- * Prevents raw exceptions or technical stack traces from reaching the user.
  */
 function mapAuthError(errorCode?: string | null): string {
   if (!errorCode) {
@@ -65,7 +107,8 @@ function mapAuthError(errorCode?: string | null): string {
 export function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const callbackUrl = searchParams.get('callbackUrl') || '/dashboard';
+  const rawCallbackUrl = searchParams.get('callbackUrl');
+  const safeCallbackUrl = getSafeCallbackUrl(rawCallbackUrl);
 
   // Form states
   const [username, setUsername] = useState('');
@@ -116,7 +159,7 @@ export function LoginForm() {
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
-    // Prevent submission while already submitting or loading
+    // Prevent submission while already submitting
     if (isLoading) return;
 
     if (!validateForm()) {
@@ -125,8 +168,6 @@ export function LoginForm() {
 
     setIsLoading(true);
     setErrorMessage(null);
-
-    let willRedirect = false;
 
     try {
       const result = await signIn('dummyjson-credentials', {
@@ -137,32 +178,25 @@ export function LoginForm() {
 
       if (!result) {
         setErrorMessage('The authentication service is temporarily unavailable. Please try again later.');
+        setIsLoading(false);
         return;
       }
 
       if (result.error) {
         setErrorMessage(mapAuthError(result.error));
+        setIsLoading(false);
         return;
       }
 
       if (result.ok) {
-        willRedirect = true;
-        // Sanitize redirect target to prevent open redirect vulnerabilities
-        const safeTarget =
-          callbackUrl.startsWith('/') && !callbackUrl.startsWith('//')
-            ? callbackUrl
-            : '/dashboard';
-        router.push(safeTarget);
-        router.refresh();
+        // Safe redirect
+        router.push(safeCallbackUrl);
+      } else {
+        setIsLoading(false);
       }
     } catch {
       setErrorMessage('An unexpected error occurred during login. Please try again.');
-    } finally {
-      // CORRECTION 6: Guaranteed loading-state cleanup. If redirect is not occurring,
-      // form is immediately returned to an interactive, recoverable state.
-      if (!willRedirect) {
-        setIsLoading(false);
-      }
+      setIsLoading(false);
     }
   };
 

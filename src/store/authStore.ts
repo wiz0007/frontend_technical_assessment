@@ -1,6 +1,11 @@
 import { create } from 'zustand';
 import { AuthStore, User } from '@/types/auth';
 
+/**
+ * Zustand store representing application-level authentication state.
+ * Mutated strictly through centralized NextAuth synchronization (AuthSync)
+ * to prevent independent components from arbitrarily establishing authentication.
+ */
 export const useAuthStore = create<AuthStore>((set) => ({
   isAuthenticated: false,
   user: null,
@@ -14,13 +19,6 @@ export const useAuthStore = create<AuthStore>((set) => ({
       isLoading: false,
       error: null,
     }),
-
-  setUser: (user: User | null) =>
-    set((state) => ({
-      user,
-      isAuthenticated: user !== null,
-      isLoading: false,
-    })),
 
   clearAuthState: () =>
     set({
@@ -41,4 +39,3 @@ export const useAuthStore = create<AuthStore>((set) => ({
       isLoading: false,
     }),
 }));
-

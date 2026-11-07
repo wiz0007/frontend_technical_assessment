@@ -44,15 +44,13 @@ const NAV_ITEMS: NavItem[] = [
     title: 'Users',
     path: '/dashboard/users',
     icon: <PeopleIcon />,
-    disabled: true,
-    badge: 'Sprint 2',
+    disabled: false,
   },
   {
     title: 'Products',
     path: '/dashboard/products',
     icon: <Inventory2Icon />,
-    disabled: true,
-    badge: 'Sprint 2',
+    disabled: false,
   },
 ];
 
@@ -98,7 +96,9 @@ export function Sidebar({ drawerWidth, mobileOpen, onDrawerClose }: SidebarProps
         </Typography>
         <List disablePadding>
           {NAV_ITEMS.map((item) => {
-            const isActive = pathname === item.path;
+            const isActive =
+              pathname === item.path ||
+              (item.path !== '/dashboard' && pathname.startsWith(item.path));
 
             if (item.disabled) {
               return (

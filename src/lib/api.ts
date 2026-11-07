@@ -2,7 +2,18 @@ import {
   DummyJsonLoginRequest,
   DummyJsonLoginResponse,
   AuthErrorCode,
-} from '../types/auth';
+} from '@/types/auth';
+import {
+  DummyJsonUser,
+  UsersResponse,
+  UsersFilterParams,
+} from '@/types/users';
+import {
+  DummyJsonProduct,
+  ProductsResponse,
+  ProductCategory,
+  ProductsFilterParams,
+} from '@/types/products';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://dummyjson.com';
 const DEFAULT_TIMEOUT_MS = 10000;
@@ -28,7 +39,6 @@ export class ApiError extends Error {
 
 /**
  * Validates the runtime payload returned by the DummyJSON auth endpoint.
- * Ensures the session is never constructed from invalid or partial data.
  */
 export function validateDummyJsonLoginResponse(data: unknown): DummyJsonLoginResponse {
   if (typeof data !== 'object' || data === null) {
@@ -41,7 +51,6 @@ export function validateDummyJsonLoginResponse(data: unknown): DummyJsonLoginRes
 
   const record = data as Record<string, unknown>;
 
-  // Validate required accessToken
   if (typeof record.accessToken !== 'string' || record.accessToken.trim() === '') {
     throw new ApiError(
       'Invalid authentication response: missing or invalid access token.',
@@ -50,7 +59,6 @@ export function validateDummyJsonLoginResponse(data: unknown): DummyJsonLoginRes
     );
   }
 
-  // Validate required id (number or non-empty string)
   const id = record.id;
   const isValidId =
     (typeof id === 'number' && !Number.isNaN(id)) ||
@@ -63,7 +71,6 @@ export function validateDummyJsonLoginResponse(data: unknown): DummyJsonLoginRes
     );
   }
 
-  // Validate required username
   if (typeof record.username !== 'string' || record.username.trim() === '') {
     throw new ApiError(
       'Invalid authentication response: missing or invalid username.',
@@ -72,7 +79,6 @@ export function validateDummyJsonLoginResponse(data: unknown): DummyJsonLoginRes
     );
   }
 
-  // Safe extraction of optional profile attributes
   return {
     id: id as number | string,
     username: record.username.trim(),
@@ -87,8 +93,8 @@ export function validateDummyJsonLoginResponse(data: unknown): DummyJsonLoginRes
 }
 
 /**
- * Robust fetch wrapper with comprehensive timeout, external signal support,
- * guaranteed timer cleanup, and safe JSON consumption.
+ * Centralized fetch wrapper supporting HeadersInit merging, timeout validation,
+ * external AbortSignal cancellation, and error normalization.
  */
 export async function apiFetch<T>(
   endpoint: string,
@@ -97,16 +103,19 @@ export async function apiFetch<T>(
 ): Promise<T> {
   const url = endpoint.startsWith('http') ? endpoint : `${API_BASE_URL}${endpoint}`;
 
+  // Validate timeout parameter
+  const validTimeout =
+    typeof timeoutMs === 'number' && timeoutMs > 0 ? timeoutMs : DEFAULT_TIMEOUT_MS;
+
   const controller = new AbortController();
   let isTimeout = false;
 
-  // Set timeout covering BOTH request dispatch and response-body parsing
   const timeoutId = setTimeout(() => {
     isTimeout = true;
     controller.abort();
-  }, timeoutMs);
+  }, validTimeout);
 
-  // Link external signal if supplied
+  // Safely link external signal without breaking timeout mechanism
   const externalSignal = options.signal;
   let externalAbortListener: (() => void) | null = null;
 
@@ -121,20 +130,22 @@ export async function apiFetch<T>(
     externalSignal.addEventListener('abort', externalAbortListener);
   }
 
+  // Safely merge Headers without overwriting caller options
+  const mergedHeaders = new Headers(options.headers);
+  if (!mergedHeaders.has('Content-Type') && options.body) {
+    mergedHeaders.set('Content-Type', 'application/json');
+  }
+
   try {
     const response = await fetch(url, {
       ...options,
       signal: controller.signal,
-      headers: {
-        'Content-Type': 'application/json',
-        ...(options.headers || {}),
-      },
+      headers: mergedHeaders,
     });
 
     const contentType = response.headers.get('content-type') || '';
     const isJson = contentType.includes('application/json');
 
-    // Consume body while timeout is still active
     const rawText = await response.text();
     let data: unknown;
 
@@ -145,7 +156,7 @@ export async function apiFetch<T>(
         data = JSON.parse(rawText);
       } catch {
         throw new ApiError(
-          'Received malformed JSON from the API server.',
+          'Received malformed JSON from API server.',
           response.status || 502,
           'MALFORMED_RESPONSE'
         );
@@ -155,7 +166,10 @@ export async function apiFetch<T>(
     }
 
     if (!response.ok) {
-      const record = typeof data === 'object' && data !== null ? (data as Record<string, unknown>) : null;
+      const record =
+        typeof data === 'object' && data !== null
+          ? (data as Record<string, unknown>)
+          : null;
       const apiMessage = typeof record?.message === 'string' ? record.message : null;
 
       let code: AuthErrorCode = 'UNKNOWN_ERROR';
@@ -193,10 +207,9 @@ export async function apiFetch<T>(
         throw new ApiError('Request was cancelled.', 499, 'UNKNOWN_ERROR');
       }
 
-      // Distinguish network failures
       return (() => {
         throw new ApiError(
-          'Unable to connect to the authentication server. Please check your network.',
+          'Unable to connect to the server. Please check your network connection.',
           503,
           'NETWORK_ERROR'
         );
@@ -205,7 +218,6 @@ export async function apiFetch<T>(
 
     throw new ApiError('An unexpected network error occurred.', 500, 'UNKNOWN_ERROR');
   } finally {
-    // Guaranteed cleanup of timer and event listeners under all return or throw conditions
     clearTimeout(timeoutId);
     if (externalSignal && externalAbortListener) {
       externalSignal.removeEventListener('abort', externalAbortListener);
@@ -213,9 +225,10 @@ export async function apiFetch<T>(
   }
 }
 
-/**
- * Authenticates credentials against DummyJSON /auth/login endpoint and validates the response.
- */
+/* =====================================================================
+   AUTHENTICATION API
+===================================================================== */
+
 export async function loginWithDummyJson(
   credentials: DummyJsonLoginRequest
 ): Promise<DummyJsonLoginResponse> {
@@ -228,6 +241,137 @@ export async function loginWithDummyJson(
     }),
   });
 
-  // Strict runtime validation ensures no partial or malformed response creates a session
   return validateDummyJsonLoginResponse(rawResponse);
+}
+
+/* =====================================================================
+   USERS API (SPRINT 2)
+===================================================================== */
+
+export async function fetchUsers(
+  params: UsersFilterParams = {}
+): Promise<UsersResponse> {
+  const limit = params.limit ?? 10;
+  const skip = params.skip ?? 0;
+  const search = params.search?.trim();
+
+  let endpoint = `/users?limit=${limit}&skip=${skip}`;
+  if (search) {
+    endpoint = `/users/search?q=${encodeURIComponent(search)}&limit=${limit}&skip=${skip}`;
+  }
+
+  const response = await apiFetch<UsersResponse>(endpoint);
+
+  return {
+    users: Array.isArray(response?.users) ? response.users : [],
+    total: typeof response?.total === 'number' ? response.total : 0,
+    skip: typeof response?.skip === 'number' ? response.skip : skip,
+    limit: typeof response?.limit === 'number' ? response.limit : limit,
+  };
+}
+
+export async function fetchUserById(id: number | string): Promise<DummyJsonUser> {
+  return apiFetch<DummyJsonUser>(`/users/${encodeURIComponent(id)}`);
+}
+
+/* =====================================================================
+   PRODUCTS API (SPRINT 2)
+===================================================================== */
+
+export async function fetchCategories(): Promise<ProductCategory[]> {
+  const raw = await apiFetch<unknown>('/products/categories');
+
+  if (!Array.isArray(raw)) {
+    return [];
+  }
+
+  // Handle both modern DummyJSON [{ slug, name, url }] and legacy string[] formats
+  return raw.map((item) => {
+    if (typeof item === 'string') {
+      return {
+        slug: item,
+        name: item.charAt(0).toUpperCase() + item.slice(1).replace(/-/g, ' '),
+      };
+    }
+    if (typeof item === 'object' && item !== null) {
+      const obj = item as Record<string, unknown>;
+      const slug = String(obj.slug || '');
+      const name = String(obj.name || slug);
+      return { slug, name };
+    }
+    return { slug: String(item), name: String(item) };
+  });
+}
+
+export async function fetchProducts(
+  params: ProductsFilterParams = {}
+): Promise<ProductsResponse> {
+  const limit = params.limit ?? 10;
+  const skip = params.skip ?? 0;
+  const search = params.search?.trim();
+  const category = params.category?.trim();
+
+  // Scenario 1: Both Category AND Search query are supplied
+  // DummyJSON does not natively support search inside category endpoint.
+  // We fetch category products (limit=0 to get all in category), then filter by query.
+  if (category && search) {
+    const categoryEndpoint = `/products/category/${encodeURIComponent(category)}?limit=0`;
+    const catResponse = await apiFetch<ProductsResponse>(categoryEndpoint);
+    const allInCat = Array.isArray(catResponse?.products) ? catResponse.products : [];
+
+    const lowerQuery = search.toLowerCase();
+    const filtered = allInCat.filter((p) => {
+      const inTitle = p.title?.toLowerCase().includes(lowerQuery);
+      const inDesc = p.description?.toLowerCase().includes(lowerQuery);
+      const inBrand = p.brand?.toLowerCase().includes(lowerQuery);
+      return inTitle || inDesc || inBrand;
+    });
+
+    const paginated = filtered.slice(skip, skip + limit);
+
+    return {
+      products: paginated,
+      total: filtered.length,
+      skip,
+      limit,
+    };
+  }
+
+  // Scenario 2: Search only (across all categories)
+  if (search) {
+    const endpoint = `/products/search?q=${encodeURIComponent(search)}&limit=${limit}&skip=${skip}`;
+    const response = await apiFetch<ProductsResponse>(endpoint);
+    return {
+      products: Array.isArray(response?.products) ? response.products : [],
+      total: typeof response?.total === 'number' ? response.total : 0,
+      skip: typeof response?.skip === 'number' ? response.skip : skip,
+      limit: typeof response?.limit === 'number' ? response.limit : limit,
+    };
+  }
+
+  // Scenario 3: Category filter only
+  if (category) {
+    const endpoint = `/products/category/${encodeURIComponent(category)}?limit=${limit}&skip=${skip}`;
+    const response = await apiFetch<ProductsResponse>(endpoint);
+    return {
+      products: Array.isArray(response?.products) ? response.products : [],
+      total: typeof response?.total === 'number' ? response.total : 0,
+      skip: typeof response?.skip === 'number' ? response.skip : skip,
+      limit: typeof response?.limit === 'number' ? response.limit : limit,
+    };
+  }
+
+  // Scenario 4: Standard paginated product listing
+  const endpoint = `/products?limit=${limit}&skip=${skip}`;
+  const response = await apiFetch<ProductsResponse>(endpoint);
+  return {
+    products: Array.isArray(response?.products) ? response.products : [],
+    total: typeof response?.total === 'number' ? response.total : 0,
+    skip: typeof response?.skip === 'number' ? response.skip : skip,
+    limit: typeof response?.limit === 'number' ? response.limit : limit,
+  };
+}
+
+export async function fetchProductById(id: number | string): Promise<DummyJsonProduct> {
+  return apiFetch<DummyJsonProduct>(`/products/${encodeURIComponent(id)}`);
 }

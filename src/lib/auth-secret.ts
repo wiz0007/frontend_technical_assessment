@@ -1,26 +1,32 @@
 /**
  * Resolves the authoritative authentication secret used across NextAuth and middleware.
- * In production (NODE_ENV === 'production'), NEXTAUTH_SECRET is strictly required.
- * In development/test, a dev fallback is only used if NEXTAUTH_SECRET is not set.
+ * In production (NODE_ENV === 'production'), NEXTAUTH_SECRET is strictly required
+ * and must be at least 32 characters long.
+ * In development/test, a guarded dev fallback is used only if NEXTAUTH_SECRET is not set.
  */
 export function getAuthSecret(): string {
   const secret = process.env.NEXTAUTH_SECRET;
 
   if (process.env.NODE_ENV === 'production') {
-    if (!secret || secret.trim() === '' || secret.includes('fallback') || secret.includes('dev-only')) {
+    if (
+      !secret ||
+      secret.trim() === '' ||
+      secret.trim().length < 32 ||
+      secret.includes('fallback') ||
+      secret.includes('dev-only')
+    ) {
       throw new Error(
-        '[FATAL CONFIG ERROR] NEXTAUTH_SECRET environment variable is missing or insecure in production. ' +
-          'A secure 32+ character secret is required for production deployment.'
+        '[FATAL CONFIG ERROR] NEXTAUTH_SECRET environment variable is missing, too short, or insecure in production. ' +
+          'A cryptographically secure secret of at least 32 characters is strictly required for production deployment.'
       );
     }
-    return secret;
+    return secret.trim();
   }
 
   // Development / test fallback
   if (secret && secret.trim() !== '') {
-    return secret;
+    return secret.trim();
   }
 
-  return 'dev-only-secret-do-not-use-in-production-help-study-abroad-auth-key';
+  return 'dev-only-secret-do-not-use-in-production-help-study-abroad-auth-key-32chars';
 }
-

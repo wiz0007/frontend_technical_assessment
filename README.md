@@ -1,24 +1,40 @@
-# Help Study Abroad &mdash; Admin Dashboard Foundation (Sprint 1 & Sprint 1.1)
+# Help Study Abroad &mdash; Admin Dashboard (Sprint 1, 1.1 & Sprint 2)
 
-Frontend technical assessment implementation for **Sprint 1 & Sprint 1.1: Foundation, Architecture, Authentication & Security Hardening**.
+Frontend technical assessment implementation for **Sprint 1, Sprint 1.1 & Sprint 2: Foundation, Authentication Hardening, Users Management & Products Catalog**.
 
-Built with Next.js (App Router), TypeScript, Material UI (MUI), Zustand, NextAuth, and the official DummyJSON Authentication API.
+Built with Next.js 14 (App Router), TypeScript, Material UI (MUI v5), Zustand, NextAuth, and the official DummyJSON API.
 
 ---
 
 ## 1. Overview & Architecture
 
-Sprint 1 & 1.1 establish a rock-solid, production-grade foundation for the Help Study Abroad Admin Dashboard:
-- **Unified Authentication Lifecycle:** NextAuth Credentials Provider authenticating against the live DummyJSON API (`https://dummyjson.com/auth/login`).
-- **Sensitive Token Isolation (Correction 2):** Sensitive `accessToken` and `refreshToken` are strictly stored in encrypted HTTP-only server-side JWT cookies. The client-side session receives only non-sensitive identity data (`id`, `username`, `firstName`, `lastName`, `email`, `gender`, `image`), eliminating token leakage to browser JS or storage.
-- **Authoritative Secret Enforcement (Correction 1):** Centralized secret resolver enforces `NEXTAUTH_SECRET` presence in production with fatal startup rejection for insecure or missing keys, while guarding development defaults.
-- **Runtime API Payload Validation (Correction 4):** Strict runtime response validator `validateDummyJsonLoginResponse()` ensures no malformed or partial API responses can construct an authenticated session.
-- **Guaranteed Timeout & Stream Protection (Correction 3):** Fetch wrapper timeout spans both request dispatch and response body consumption, with guaranteed timer cleanup in `finally` blocks and distinction between network errors, timeouts, and cancellations.
-- **Safe Error Mapping & Recovery (Correction 5 & 6):** User-facing error mapper shields backend stack traces while providing clear recovery paths; guaranteed loading state reset prevents stuck forms.
-- **Controlled Logout Lifecycle (Correction 7):** Logout terminates server-side NextAuth session cookies before clearing Zustand state and flushing client router caches.
-- **Synchronized State Management (Correction 8):** Zustand authentication store strictly mirrors NextAuth session authority without duplicate token stores or redundant dispatches.
-- **Server-Side Route Protection (Correction 9):** Next.js Edge Middleware verifying JWT tokens to prevent unauthenticated access to `/dashboard/*` and prevent authenticated users from returning to `/login`.
-- **Sprint 2 Extensibility:** Pre-wired layout, navigation slots, and shared types designed for seamless integration of the Users and Products modules in Sprint 2.
+This application delivers a production-grade admin dashboard with full authentication, state synchronization, server-side route protection, and complete business modules for Users and Products:
+
+- **Unified Authentication Lifecycle:** NextAuth Credentials Provider authenticating against the live DummyJSON API (`POST https://dummyjson.com/auth/login`).
+- **Sensitive Token Isolation:** `accessToken` and `refreshToken` are encapsulated in encrypted HTTP-only server-side JWT cookies. The client-side session (`session.user`) receives exclusively non-sensitive identity data (`id`, `username`, `firstName`, `lastName`, `email`, `gender`, `image`), eliminating token leakage to browser JS or storage.
+- **Authoritative Secret Enforcement:** Centralized secret resolver enforces `NEXTAUTH_SECRET` presence in production with a strict 32-character minimum length requirement and startup termination on insecure configurations.
+- **Strict Callback URL Sanitization:** URL parsing and same-origin validation neutralizing open redirect, protocol-relative, and dangerous scheme attacks.
+- **Controlled Logout Lifecycle:** Sign-out terminates server-side NextAuth session cookies before clearing Zustand state and flushing client router caches.
+- **Independent State Management:** Three independent Zustand stores:
+  - `authStore`: Authoritative session synchronization (`isAuthenticated`, `user`, `isLoading`, `error`). Public mutation is restricted to centralized synchronization.
+  - `usersStore`: Users listing, pagination, search query, selected user detail, loading and error states.
+  - `productsStore`: Products catalog, dynamic categories, category filtering, search query, pagination, selected product detail, loading and error states.
+- **Users Management Module (`/dashboard/users` & `/dashboard/users/[id]`):**
+  - Live DummyJSON Users API integration (`GET https://dummyjson.com/users`, `/users/search?q=...`, `/users/[id]`).
+  - API-side pagination (limit, skip, total calculations).
+  - Debounced search across user records.
+  - Responsive table with user demographics, role, company, and quick actions.
+  - Rich user detail page displaying personal attributes, company & job, education, and address.
+  - Full loading skeleton, error handling with retry, and empty states.
+- **Products Catalog Module (`/dashboard/products` & `/dashboard/products/[id]`):**
+  - Live DummyJSON Products API integration (`GET https://dummyjson.com/products`, `/products/categories`, `/products/category/[slug]`, `/products/search?q=...`, `/products/[id]`).
+  - Dynamic category dropdown with "All Categories" default.
+  - Debounced product search.
+  - Smart composition: when both category and search query are active, category records are searched comprehensively without silently dropping filters.
+  - Responsive product cards grid with pricing, discount badges, inventory status, ratings, and category chips.
+  - Custom accessible product image carousel with main preview, previous/next controls, and thumbnail strip.
+  - Rich product detail page displaying specifications, dimensions, weight, warranty, shipping policy, return policy, and customer reviews.
+- **Server-Side Route Protection:** Next.js Edge Middleware verifying JWT tokens for all `/dashboard/*` routes and redirecting unauthenticated users to `/login?callbackUrl=...`, while preventing authenticated users from visiting `/login`.
 
 ---
 
@@ -30,8 +46,8 @@ Sprint 1 & 1.1 establish a rock-solid, production-grade foundation for the Help 
 | **TypeScript (Strict)** | Static typing & interface contracts |
 | **Material UI (MUI v5)** | Component library & responsive design system |
 | **NextAuth.js (v4)** | Session lifecycle, credentials provider, JWT management |
-| **Zustand** | Reactive application-level client authentication store |
-| **DummyJSON API** | External authentication provider |
+| **Zustand** | Independent client-side reactive state stores |
+| **DummyJSON API** | External authentication, users, and products provider |
 | **ESLint** | Code quality & best practice enforcement |
 
 ---
@@ -40,52 +56,68 @@ Sprint 1 & 1.1 establish a rock-solid, production-grade foundation for the Help 
 
 ```text
 frontend_assess/
-├── .env.example             # Documented environment variable template
-├── .env.local               # Local development secrets (git-ignored)
-├── .eslintrc.json           # ESLint configuration
-├── .gitignore               # Standard Git ignore rules
-├── next.config.mjs          # Next.js configuration (remote image patterns)
-├── package.json             # Dependencies and scripts
-├── tsconfig.json            # Strict TypeScript configuration
+├── .env.example                               # Documented environment variable template
+├── .env.local                                 # Local development secrets (git-ignored)
+├── .eslintrc.json                             # ESLint configuration
+├── .gitignore                                 # Git ignore rules
+├── next.config.mjs                            # Next.js configuration (remote image patterns)
+├── package.json                               # Dependencies and scripts
+├── tsconfig.json                              # Strict TypeScript configuration
+├── README.md                                  # Complete project documentation
+├── test-runtime.mjs                           # Automated end-to-end integration & audit test suite
 └── src/
     ├── app/
     │   ├── (auth)/
     │   │   └── login/
-    │   │       └── page.tsx           # Login page hosting LoginForm
+    │   │       └── page.tsx                   # Login page hosting LoginForm
     │   ├── (dashboard)/
     │   │   └── dashboard/
-    │   │       ├── layout.tsx         # Dashboard layout wrapper
-    │   │       └── page.tsx           # Dashboard landing & foundation status
+    │   │       ├── layout.tsx                 # Dashboard shell wrapper
+    │   │       ├── page.tsx                   # Dashboard landing & architecture status
+    │   │       ├── products/
+    │   │       │   ├── [id]/
+    │   │       │   │   └── page.tsx           # Product detail view with carousel & specs
+    │   │       │   └── page.tsx               # Products catalog with search, category & pagination
+    │   │       └── users/
+    │   │           ├── [id]/
+    │   │           │   └── page.tsx           # User profile detail view
+    │   │           └── page.tsx               # Users management table with search & pagination
     │   ├── api/
     │   │   └── auth/
     │   │       └── [...nextauth]/
-    │   │           └── route.ts       # NextAuth App Router endpoint
-    │   ├── layout.tsx                 # Root layout with AppProviders
-    │   └── page.tsx                   # Root redirect handler
+    │   │           └── route.ts               # NextAuth App Router endpoint
+    │   ├── layout.tsx                         # Root layout with AppProviders
+    │   └── page.tsx                           # Root redirect handler
     ├── components/
     │   ├── auth/
-    │   │   └── LoginForm.tsx          # Accessible MUI login form with error mapping & demo buttons
+    │   │   └── LoginForm.tsx                  # Accessible MUI login form with error mapping
     │   ├── common/
-    │   │   ├── ErrorMessage.tsx       # Reusable MUI error alert
-    │   │   └── Loading.tsx            # Reusable circular loading state
-    │   └── layout/
-    │       ├── DashboardLayout.tsx    # Responsive shell layout
-    │       ├── Header.tsx             # Fixed AppBar with user menu & controlled logout
-    │       └── Sidebar.tsx            # Desktop permanent & mobile drawer nav
+    │   │   ├── ErrorMessage.tsx               # Reusable MUI error alert with retry
+    │   │   └── Loading.tsx                    # Reusable circular loading state
+    │   ├── layout/
+    │   │   ├── DashboardLayout.tsx            # Responsive shell layout
+    │   │   ├── Header.tsx                     # Fixed AppBar with user menu & controlled logout
+    │   │   └── Sidebar.tsx                    # Desktop permanent & mobile drawer navigation
+    │   └── products/
+    │       └── ProductCarousel.tsx            # Accessible image carousel for product details
     ├── lib/
-    │   ├── api.ts                     # Fetch client with timeout, cancel support & runtime validator
-    │   ├── auth.ts                    # NextAuth credentials provider configuration
-    │   └── auth-secret.ts             # Centralized environment-aware secret resolver
-    ├── middleware.ts                  # Server-side route protection & redirect guard
+    │   ├── api.ts                             # Centralized API fetcher (Auth, Users, Products)
+    │   ├── auth.ts                            # NextAuth credentials provider configuration
+    │   └── auth-secret.ts                     # Centralized secret resolver (32+ chars requirement)
+    ├── middleware.ts                          # Server-side route protection & redirect guard
     ├── providers/
-    │   ├── AppProviders.tsx           # Combines MUI, Theme, Session, and Store Sync
-    │   └── SessionProvider.tsx        # NextAuth SessionProvider wrapper
+    │   ├── AppProviders.tsx                   # Combines MUI, Theme, Session, and Store Sync
+    │   └── SessionProvider.tsx                # NextAuth SessionProvider wrapper
     ├── store/
-    │   └── authStore.ts               # Zustand authentication store
+    │   ├── authStore.ts                       # Zustand authentication store
+    │   ├── productsStore.ts                   # Independent Zustand products store
+    │   └── usersStore.ts                      # Independent Zustand users store
     ├── theme/
-    │   └── theme.ts                   # Custom Material UI theme configuration
+    │   └── theme.ts                           # Custom Material UI theme configuration
     └── types/
-        └── auth.ts                    # TypeScript types and NextAuth module augmentations
+        ├── auth.ts                            # Authentication TypeScript types & augmentations
+        ├── products.ts                        # Products & categories TypeScript types
+        └── users.ts                           # Users TypeScript types
 ```
 
 ---
@@ -98,11 +130,12 @@ frontend_assess/
 
 ### Installation
 
-1. Navigate to the project root:
+1. Clone or extract the project repository.
+2. Navigate to the project root:
    ```bash
    cd frontend_assess
    ```
-2. Install dependencies:
+3. Install dependencies:
    ```bash
    npm install
    ```
@@ -113,12 +146,12 @@ frontend_assess/
    ```bash
    cp .env.example .env.local
    ```
-2. Verify or update the environment variables:
+2. Verify or update environment variables:
    ```env
    # Site URL for NextAuth callbacks
    NEXTAUTH_URL=http://localhost:3000
 
-   # Secret used to encrypt NextAuth JWT tokens (required in production)
+   # Secret used to encrypt NextAuth JWT tokens (minimum 32 characters in production)
    NEXTAUTH_SECRET=your-secure-random-secret-key-at-least-32-chars
 
    # Live DummyJSON API endpoint
@@ -140,46 +173,17 @@ frontend_assess/
 
 ---
 
-## 6. Authentication Implementation Details
+## 6. Verification & Quality Checklist
 
-### 1. Credentials Verification Flow
-1. User enters username and password in `LoginForm.tsx`.
-2. Client-side input validation rejects empty or whitespace-only inputs.
-3. Form invokes NextAuth's `signIn('dummyjson-credentials', { username, password, redirect: false })`.
-4. NextAuth's `authorize` callback in `src/lib/auth.ts` dispatches a `POST` request to `https://dummyjson.com/auth/login`.
-5. Upon response from DummyJSON:
-   - `validateDummyJsonLoginResponse()` validates presence of `accessToken`, `id`, and `username`.
-   - The user profile and tokens are safely passed into the encrypted server-side JWT.
-   - The client session (`session.user`) is populated **exclusively** with non-sensitive user identity data (`id`, `username`, `firstName`, `lastName`, `email`, `gender`, `image`).
-   - The client navigates smoothly to `/dashboard`.
-6. Upon failed response:
-   - Standardized error codes (`INVALID_CREDENTIALS`, `TIMEOUT`, `NETWORK_ERROR`, `SERVICE_UNAVAILABLE`) are mapped to clean user-facing messages.
-   - The login form loading state is guaranteed to reset in the `finally` block, leaving the form fully interactive for retries.
-
-### 2. Live Demo Accounts (DummyJSON)
-To test authentication, you can use any valid DummyJSON user account:
-- **Username:** `emilys` &nbsp;|&nbsp; **Password:** `emilyspass`
-- **Username:** `michaelw` &nbsp;|&nbsp; **Password:** `michaelwpass`
-
-Quick-fill demo buttons are provided directly on the login form for fast testing.
-
----
-
-## 7. State Management & Synchronization Architecture
-
-- **NextAuth as the Single Authority:** NextAuth manages session tokens, secure cookies, and token expiration. Tokens are **not** exposed to client JS or persisted in insecure storage.
-- **Zustand Application Store (`useAuthStore`):** Provides reactive client-side access to `isAuthenticated`, `user`, `isLoading`, and `error`.
-- **Automatic Synchronization (`AuthSync`):** An internal synchronization provider in `src/providers/AppProviders.tsx` observes NextAuth's `useSession()` status and updates the Zustand store without redundant re-renders:
-  - When NextAuth is authenticated &rarr; Zustand is populated with the authenticated user data.
-  - When NextAuth is unauthenticated (or logged out) &rarr; Zustand is immediately wiped clean.
-  - On page refresh &rarr; NextAuth rehydrates the session from the secure cookie and Zustand re-synchronizes seamlessly.
-
----
-
-## 8. Route Protection Strategy
-
-Route protection is implemented at the server level via Next.js Middleware (`src/middleware.ts`):
-- **Protected Routes:** `/dashboard` and `/dashboard/:path*` require a valid JWT token. Unauthenticated requests are immediately redirected to `/login?callbackUrl=...`.
-- **Guest-Only Routes:** Authenticated users attempting to visit `/login` are automatically redirected to `/dashboard`.
-- **Root Route (`/`):** Server component in `src/app/page.tsx` checks session state on initial load and redirects to `/dashboard` if authenticated, or `/login` if unauthenticated.
-- **Back-Button & Stale Cache Prevention:** On sign-out, NextAuth invalidates the session cookie, clears Zustand state, flushes the in-memory router cache, and redirects to `/login`. Returning to `/dashboard` via browser history immediately triggers the middleware redirect.
+- [x] TypeScript strict compilation (`npx tsc --noEmit` &mdash; 0 errors)
+- [x] ESLint analysis (`npm run lint` &mdash; 0 warnings or errors)
+- [x] Production build (`npm run build` &mdash; 0 errors, all 8 routes generated)
+- [x] Automated test suite (`node test-runtime.mjs` &mdash; 100% passed)
+- [x] Authentication secret 32-character enforcement verified
+- [x] Callback URL validation neutralizing external/protocol-relative vectors verified
+- [x] Sensitive tokens stripped from client session verified
+- [x] Users listing, API pagination, search, and detail page verified
+- [x] Products listing, API pagination, category filter, search, and detail page verified
+- [x] Product image carousel with thumbnail navigation and fallback verified
+- [x] Independent Zustand stores (`authStore`, `usersStore`, `productsStore`) verified
+- [x] Route protection for all `/dashboard/*` endpoints verified

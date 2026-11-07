@@ -17,6 +17,8 @@ import MenuIcon from '@mui/icons-material/Menu';
 import LogoutIcon from '@mui/icons-material/Logout';
 import PersonOutlineIcon from '@mui/icons-material/PersonOutline';
 import CircularProgress from '@mui/material/CircularProgress';
+import Snackbar from '@mui/material/Snackbar';
+import Alert from '@mui/material/Alert';
 import { signOut } from 'next-auth/react';
 import { useAuthStore } from '@/store/authStore';
 
@@ -31,6 +33,7 @@ export function Header({ drawerWidth, onDrawerToggle }: HeaderProps) {
 
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
+  const [logoutError, setLogoutError] = useState<string | null>(null);
 
   const handleOpenUserMenu = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);
@@ -44,6 +47,7 @@ export function Header({ drawerWidth, onDrawerToggle }: HeaderProps) {
     if (isLoggingOut) return;
     handleCloseUserMenu();
     setIsLoggingOut(true);
+    setLogoutError(null);
 
     try {
       // 1. Terminate NextAuth session cookie on server
@@ -59,8 +63,9 @@ export function Header({ drawerWidth, onDrawerToggle }: HeaderProps) {
       // and prevent stale authenticated content on browser back navigation
       window.location.href = '/login';
     } catch {
-      // If sign-out fails, do NOT claim logout succeeded
+      // If sign-out fails, do NOT claim logout succeeded; notify user and allow retry
       setIsLoggingOut(false);
+      setLogoutError('Failed to sign out. Please check your network and try again.');
     }
   };
 
@@ -183,6 +188,18 @@ export function Header({ drawerWidth, onDrawerToggle }: HeaderProps) {
           </Menu>
         </Box>
       </Toolbar>
+
+      {/* Logout error notification */}
+      <Snackbar
+        open={Boolean(logoutError)}
+        autoHideDuration={6000}
+        onClose={() => setLogoutError(null)}
+        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
+      >
+        <Alert severity="error" onClose={() => setLogoutError(null)} sx={{ width: '100%' }}>
+          {logoutError}
+        </Alert>
+      </Snackbar>
     </AppBar>
   );
 }
