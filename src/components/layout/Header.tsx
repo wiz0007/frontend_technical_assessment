@@ -41,17 +41,25 @@ export function Header({ drawerWidth, onDrawerToggle }: HeaderProps) {
   };
 
   const handleLogout = async () => {
+    if (isLoggingOut) return;
     handleCloseUserMenu();
     setIsLoggingOut(true);
+
     try {
-      // Clear Zustand client state immediately
-      clearAuthState();
-      // Terminate NextAuth session and redirect to /login
+      // 1. Terminate NextAuth session cookie on server
       await signOut({
+        redirect: false,
         callbackUrl: '/login',
-        redirect: true,
       });
+
+      // 2. Clear application-level client Zustand state
+      clearAuthState();
+
+      // 3. Perform hard redirect to /login to flush in-memory Next.js router cache
+      // and prevent stale authenticated content on browser back navigation
+      window.location.href = '/login';
     } catch {
+      // If sign-out fails, do NOT claim logout succeeded
       setIsLoggingOut(false);
     }
   };

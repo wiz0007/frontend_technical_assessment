@@ -43,13 +43,19 @@ export interface AuthActions {
 
 export type AuthStore = AuthState & AuthActions;
 
+export type AuthErrorCode =
+  | 'INVALID_CREDENTIALS'
+  | 'NETWORK_ERROR'
+  | 'TIMEOUT'
+  | 'SERVICE_UNAVAILABLE'
+  | 'MALFORMED_RESPONSE'
+  | 'UNKNOWN_ERROR';
+
 // Module augmentation for next-auth
+// Notice: Tokens are strictly kept server-side in JWT and NEVER exposed to Session['user']
 declare module 'next-auth' {
   interface Session {
-    user: User & {
-      accessToken?: string;
-      refreshToken?: string;
-    };
+    user: User;
     expires: string;
   }
 

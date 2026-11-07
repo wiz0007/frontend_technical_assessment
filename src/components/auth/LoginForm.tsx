@@ -20,6 +20,48 @@ import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import LockOutlinedIcon from '@mui/icons-material/LockOutlined';
 import PersonOutlineIcon from '@mui/icons-material/PersonOutline';
 
+/**
+ * Standardized user-facing error message mapping.
+ * Prevents raw exceptions or technical stack traces from reaching the user.
+ */
+function mapAuthError(errorCode?: string | null): string {
+  if (!errorCode) {
+    return 'Invalid username or password. Please verify your credentials and try again.';
+  }
+
+  const normalized = errorCode.toUpperCase();
+
+  if (
+    normalized.includes('INVALID_CREDENTIALS') ||
+    normalized.includes('CREDENTIALSSIGNIN') ||
+    normalized.includes('CREDENTIAL')
+  ) {
+    return 'Invalid username or password. Please verify your credentials and try again.';
+  }
+
+  if (normalized.includes('NETWORK_ERROR')) {
+    return 'Unable to reach the authentication server. Please check your internet connection and try again.';
+  }
+
+  if (normalized.includes('TIMEOUT')) {
+    return 'The authentication request timed out. Please try again.';
+  }
+
+  if (normalized.includes('SERVICE_UNAVAILABLE')) {
+    return 'The authentication service is temporarily unavailable. Please try again later.';
+  }
+
+  if (normalized.includes('MALFORMED_RESPONSE')) {
+    return 'Authentication failed due to an unexpected server response. Please try again.';
+  }
+
+  if (normalized.includes('EMPTY_FIELDS')) {
+    return 'Username and password cannot be empty or whitespace.';
+  }
+
+  return 'An unexpected authentication error occurred. Please try again.';
+}
+
 export function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -84,6 +126,8 @@ export function LoginForm() {
     setIsLoading(true);
     setErrorMessage(null);
 
+    let willRedirect = false;
+
     try {
       const result = await signIn('dummyjson-credentials', {
         redirect: false,
@@ -92,28 +136,18 @@ export function LoginForm() {
       });
 
       if (!result) {
-        setErrorMessage('Authentication service is currently unavailable. Please try again.');
-        setIsLoading(false);
+        setErrorMessage('The authentication service is temporarily unavailable. Please try again later.');
         return;
       }
 
       if (result.error) {
-        // DummyJSON returns 'Invalid credentials' or custom message
-        const isCredentialMismatch =
-          result.error.toLowerCase().includes('credential') ||
-          result.error === 'CredentialsSignin';
-
-        setErrorMessage(
-          isCredentialMismatch
-            ? 'Invalid username or password. Please verify your credentials and try again.'
-            : result.error
-        );
-        setIsLoading(false);
+        setErrorMessage(mapAuthError(result.error));
         return;
       }
 
       if (result.ok) {
-        // Safe redirect to callbackUrl or /dashboard
+        willRedirect = true;
+        // Sanitize redirect target to prevent open redirect vulnerabilities
         const safeTarget =
           callbackUrl.startsWith('/') && !callbackUrl.startsWith('//')
             ? callbackUrl
@@ -121,11 +155,14 @@ export function LoginForm() {
         router.push(safeTarget);
         router.refresh();
       }
-    } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : 'An unexpected error occurred during login.';
-      setErrorMessage(message);
-      setIsLoading(false);
+    } catch {
+      setErrorMessage('An unexpected error occurred during login. Please try again.');
+    } finally {
+      // CORRECTION 6: Guaranteed loading-state cleanup. If redirect is not occurring,
+      // form is immediately returned to an interactive, recoverable state.
+      if (!willRedirect) {
+        setIsLoading(false);
+      }
     }
   };
 
@@ -300,4 +337,3 @@ export function LoginForm() {
     </Card>
   );
 }
-

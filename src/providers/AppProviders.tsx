@@ -11,7 +11,8 @@ import { useAuthStore } from '@/store/authStore';
 
 /**
  * Synchronizes the authoritative NextAuth session with the application-level Zustand store.
- * Ensures single source of truth without competing authentication managers.
+ * Eliminates redundant store dispatches, prevents race conditions, and guards against
+ * premature unauthenticated state during hydration.
  */
 function AuthSync({ children }: { children: React.ReactNode }) {
   const { data: session, status } = useSession();
@@ -20,20 +21,38 @@ function AuthSync({ children }: { children: React.ReactNode }) {
   const setLoading = useAuthStore((s) => s.setLoading);
 
   useEffect(() => {
+    const current = useAuthStore.getState();
+
     if (status === 'loading') {
-      setLoading(true);
-    } else if (status === 'authenticated' && session?.user) {
-      setAuthState(true, {
-        id: session.user.id,
-        username: session.user.username || '',
-        email: session.user.email || '',
-        firstName: session.user.firstName || '',
-        lastName: session.user.lastName || '',
-        gender: session.user.gender || '',
-        image: session.user.image || '',
-      });
-    } else if (status === 'unauthenticated') {
-      clearAuthState();
+      if (!current.isLoading) {
+        setLoading(true);
+      }
+      return;
+    }
+
+    if (status === 'authenticated' && session?.user) {
+      const currentUserId = current.user?.id;
+      const nextUserId = session.user.id;
+
+      // Only dispatch if state is unauthenticated or user identity has changed
+      if (!current.isAuthenticated || currentUserId !== nextUserId || current.isLoading) {
+        setAuthState(true, {
+          id: session.user.id,
+          username: session.user.username || '',
+          email: session.user.email || '',
+          firstName: session.user.firstName || '',
+          lastName: session.user.lastName || '',
+          gender: session.user.gender || '',
+          image: session.user.image || '',
+        });
+      }
+      return;
+    }
+
+    if (status === 'unauthenticated') {
+      if (current.isAuthenticated || current.user !== null || current.isLoading) {
+        clearAuthState();
+      }
     }
   }, [session, status, setAuthState, clearAuthState, setLoading]);
 

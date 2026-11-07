@@ -1,6 +1,7 @@
 import { NextAuthOptions } from 'next-auth';
 import CredentialsProvider from 'next-auth/providers/credentials';
-import { loginWithDummyJson } from '@/lib/api';
+import { loginWithDummyJson, ApiError } from '@/lib/api';
+import { getAuthSecret } from '@/lib/auth-secret';
 import { User } from '@/types/auth';
 
 export const authOptions: NextAuthOptions = {
@@ -14,14 +15,14 @@ export const authOptions: NextAuthOptions = {
       },
       async authorize(credentials) {
         if (!credentials?.username || !credentials?.password) {
-          throw new Error('Username and password are required');
+          throw new Error('EMPTY_FIELDS');
         }
 
         const username = credentials.username.trim();
         const password = credentials.password;
 
         if (!username || !password) {
-          throw new Error('Username and password cannot be empty or whitespace');
+          throw new Error('EMPTY_FIELDS');
         }
 
         try {
@@ -30,11 +31,7 @@ export const authOptions: NextAuthOptions = {
             password,
           });
 
-          if (!authResponse || !authResponse.accessToken) {
-            throw new Error('Invalid authentication response from server');
-          }
-
-          // Return conforming NextAuth User object
+          // Return conforming User object for the JWT token
           return {
             id: authResponse.id,
             username: authResponse.username,
@@ -47,8 +44,11 @@ export const authOptions: NextAuthOptions = {
             refreshToken: authResponse.refreshToken,
           };
         } catch (error: unknown) {
-          const message = error instanceof Error ? error.message : 'Authentication failed';
-          throw new Error(message);
+          if (error instanceof ApiError) {
+            // Throw recognized error code for safe UI mapping without exposing internals
+            throw new Error(error.code || 'UNKNOWN_ERROR');
+          }
+          throw new Error('UNKNOWN_ERROR');
         }
       },
     }),
@@ -60,6 +60,7 @@ export const authOptions: NextAuthOptions = {
   callbacks: {
     async jwt({ token, user }) {
       if (user) {
+        // Store user profile and sensitive tokens safely in encrypted server-side JWT
         token.user = {
           id: user.id,
           username: user.username,
@@ -76,11 +77,17 @@ export const authOptions: NextAuthOptions = {
     },
     async session({ session, token }) {
       if (token?.user) {
+        // CORRECTION 2: Only non-sensitive user profile data is exposed to client-accessible session.
+        // Tokens (accessToken, refreshToken) are strictly excluded.
         session.user = {
-          ...(token.user as User),
-          accessToken: token.accessToken as string,
-          refreshToken: token.refreshToken as string,
-        };
+          id: token.user.id,
+          username: token.user.username,
+          email: token.user.email,
+          firstName: token.user.firstName,
+          lastName: token.user.lastName,
+          gender: token.user.gender,
+          image: token.user.image,
+        } as User;
       }
       return session;
     },
@@ -89,6 +96,6 @@ export const authOptions: NextAuthOptions = {
     signIn: '/login',
     error: '/login',
   },
-  secret: process.env.NEXTAUTH_SECRET || 'development-fallback-secret-for-assessment-only-not-production',
+  secret: getAuthSecret(),
   debug: process.env.NODE_ENV === 'development',
 };
