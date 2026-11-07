@@ -1,5 +1,6 @@
 import { spawn } from 'child_process';
 import { getAuthSecret } from './src/lib/auth-secret.ts';
+import { getSafeCallbackUrl } from './src/lib/safe-callback-url.ts';
 import {
   ApiError,
   validateDummyJsonLoginResponse,
@@ -96,32 +97,9 @@ try {
 }
 
 /* -------------------------------------------------------------
-   2. SPRINT 1.1 CALLBACK URL VALIDATION
+   2. SPRINT 1.1 CALLBACK URL VALIDATION (PRODUCTION IMPORT)
 ------------------------------------------------------------- */
-console.log('\n[Test 1.2] Verifying getSafeCallbackUrl() validation...');
-function testSafeCallbackUrl(raw) {
-  if (!raw || typeof raw !== 'string') return '/dashboard';
-  const trimmed = raw.trim();
-  if (
-    trimmed === '' ||
-    trimmed.startsWith('//') ||
-    trimmed.startsWith('/\\') ||
-    trimmed.startsWith('\\') ||
-    trimmed.toLowerCase().startsWith('javascript:') ||
-    trimmed.toLowerCase().startsWith('data:') ||
-    trimmed.toLowerCase().startsWith('vbscript:')
-  ) {
-    return '/dashboard';
-  }
-  try {
-    const parsed = new URL(trimmed, 'http://localhost');
-    if (parsed.origin !== 'http://localhost') return '/dashboard';
-    if (!parsed.pathname.startsWith('/') || parsed.pathname.startsWith('//')) return '/dashboard';
-    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
-  } catch {
-    return '/dashboard';
-  }
-}
+console.log('\n[Test 1.2] Verifying getSafeCallbackUrl() production validation...');
 
 const safeCases = [
   { input: '/dashboard', expected: '/dashboard' },
@@ -138,7 +116,7 @@ const safeCases = [
 ];
 
 for (const c of safeCases) {
-  const res = testSafeCallbackUrl(c.input);
+  const res = getSafeCallbackUrl(c.input);
   if (res === c.expected) {
     recordPass(`Callback URL: "${c.input}" -> "${res}"`);
   } else {

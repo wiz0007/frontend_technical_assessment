@@ -70,6 +70,7 @@ export interface UsersActions {
   setPagination: (page: number, limit?: number) => void;
   fetchUsers: () => Promise<void>;
   fetchUserById: (id: number | string) => Promise<void>;
+  cancelUserDetailRequest: () => void;
   clearSelectedUser: () => void;
   clearError: () => void;
 }

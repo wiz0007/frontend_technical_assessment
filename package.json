@@ -7,7 +7,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "test": "node --experimental-strip-types test-runtime.mjs"
+    "test": "node --experimental-strip-types test-unit.mjs",
+    "test:unit": "node --experimental-strip-types test-unit.mjs",
+    "test:e2e": "node --experimental-strip-types test-runtime.mjs"
   },
   "dependencies": {
     "@emotion/cache": "^11.13.1",

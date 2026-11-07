@@ -2,6 +2,7 @@ import { NextAuthOptions } from 'next-auth';
 import CredentialsProvider from 'next-auth/providers/credentials';
 import { loginWithDummyJson, ApiError } from '@/lib/api';
 import { getAuthSecret } from '@/lib/auth-secret';
+import { calculateTokenExpiresAt, reconcileTokenState } from '@/lib/token-policy';
 import { User } from '@/types/auth';
 
 export const authOptions: NextAuthOptions = {
@@ -72,20 +73,12 @@ export const authOptions: NextAuthOptions = {
         };
         token.accessToken = user.accessToken;
         token.refreshToken = user.refreshToken;
-        // Upstream token expires in 60 minutes
-        token.accessTokenExpires = Date.now() + 60 * 60 * 1000;
+        token.accessTokenExpires = calculateTokenExpiresAt(user.expiresInMins ?? 60);
         token.error = undefined;
       }
 
-      // Reconcile upstream token expiration policy
-      if (token.accessTokenExpires && Date.now() > (token.accessTokenExpires as number)) {
-        return {
-          ...token,
-          error: 'AccessTokenExpired',
-        };
-      }
-
-      return token;
+      // Reconcile upstream token expiration policy using centralized policy
+      return reconcileTokenState(token as unknown as Record<string, unknown>);
     },
     async session({ session, token }) {
       // Invalidate session if upstream token has expired

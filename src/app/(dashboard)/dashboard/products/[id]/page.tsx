@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useEffect } from 'react';
+import React, { useEffect, useMemo } from 'react';
 import Link from 'next/link';
 import { useParams } from 'next/navigation';
 import Box from '@mui/material/Box';
@@ -37,6 +37,21 @@ export default function ProductDetailPage() {
   const error = useProductsStore((s) => s.error);
   const fetchProductById = useProductsStore((s) => s.fetchProductById);
   const clearSelectedProduct = useProductsStore((s) => s.clearSelectedProduct);
+
+  // Requirement S2-04: Stable image collection memoized across renders (called at top level)
+  const effectiveImages = useMemo(() => {
+    if (!selectedProduct) return [];
+    if (Array.isArray(selectedProduct.images) && selectedProduct.images.length > 0) {
+      const validImages = selectedProduct.images.filter(
+        (img): img is string => typeof img === 'string' && img.trim() !== ''
+      );
+      if (validImages.length > 0) return validImages;
+    }
+    if (selectedProduct.thumbnail && typeof selectedProduct.thumbnail === 'string') {
+      return [selectedProduct.thumbnail];
+    }
+    return [];
+  }, [selectedProduct]);
 
   useEffect(() => {
     if (id) {
@@ -100,8 +115,9 @@ export default function ProductDetailPage() {
         {/* Left Column: Image Carousel */}
         <Grid item xs={12} md={6}>
           <ProductCarousel
-            images={selectedProduct.images?.length ? selectedProduct.images : [selectedProduct.thumbnail]}
+            images={effectiveImages}
             title={selectedProduct.title}
+            productId={selectedProduct.id}
           />
         </Grid>
 

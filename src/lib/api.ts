@@ -14,6 +14,7 @@ import type {
   ProductCategory,
   ProductsFilterParams,
 } from '@/types/products';
+import { categoryProductsCache } from './category-cache.ts';
 
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'https://dummyjson.com';
 const DEFAULT_TIMEOUT_MS = 10000;
@@ -35,6 +36,17 @@ export class ApiError extends Error {
     this.code = code;
     this.data = data;
   }
+}
+
+/**
+ * Checks whether an exception represents intentional request cancellation.
+ */
+export function isCancelledError(err: unknown): boolean {
+  if (!err) return false;
+  if (err instanceof DOMException && err.name === 'AbortError') return true;
+  if (err instanceof ApiError && (err.code === 'REQUEST_CANCELLED' || err.status === 499)) return true;
+  if (err instanceof Error && err.name === 'AbortError') return true;
+  return false;
 }
 
 /* =====================================================================
@@ -343,7 +355,7 @@ export async function apiFetch<T>(
   if (externalSignal) {
     if (externalSignal.aborted) {
       clearTimeout(timeoutId);
-      throw new ApiError('Request was cancelled.', 499, 'UNKNOWN_ERROR');
+      throw new ApiError('Request was cancelled.', 499, 'REQUEST_CANCELLED');
     }
     externalAbortListener = () => {
       controller.abort();
@@ -425,7 +437,7 @@ export async function apiFetch<T>(
             'TIMEOUT'
           );
         }
-        throw new ApiError('Request was cancelled.', 499, 'UNKNOWN_ERROR');
+        throw new ApiError('Request was cancelled.', 499, 'REQUEST_CANCELLED');
       }
 
       return (() => {
@@ -500,10 +512,6 @@ export async function fetchUserById(
    PRODUCTS API (SPRINT 2)
 ===================================================================== */
 
-// In-memory cache for category products to avoid repeated downloads when filtering + searching
-const categoryProductsCache = new Map<string, { products: DummyJsonProduct[]; timestamp: number }>();
-const CATEGORY_CACHE_TTL_MS = 60000; // 60 seconds
-
 export async function fetchCategories(options?: RequestInit): Promise<ProductCategory[]> {
   const raw = await apiFetch<unknown>('/products/categories', options);
   return validateCategories(raw);
@@ -520,21 +528,20 @@ export async function fetchProducts(
 
   // Scenario 1: Both Category AND Search query are supplied
   // UPSTREAM API LIMITATION: DummyJSON does not natively support search within category endpoint.
-  // We fetch category products (cached for 60s to prevent repeated downloads), filter deterministically,
-  // and apply pagination accurately.
+  // We fetch category products (cached in bounded LRU cache for 60s to prevent repeated downloads),
+  // filter deterministically, and apply slice-based pagination accurately.
   if (category && search) {
-    const cacheKey = category.toLowerCase();
-    const cached = categoryProductsCache.get(cacheKey);
+    const cached = categoryProductsCache.get(category);
     let allInCat: DummyJsonProduct[];
 
-    if (cached && Date.now() - cached.timestamp < CATEGORY_CACHE_TTL_MS) {
-      allInCat = cached.products;
+    if (cached) {
+      allInCat = cached;
     } else {
       const categoryEndpoint = `/products/category/${encodeURIComponent(category)}?limit=0`;
       const rawCatResponse = await apiFetch<unknown>(categoryEndpoint, options);
       const validatedCat = validateProductsResponse(rawCatResponse, 0, 0);
       allInCat = validatedCat.products;
-      categoryProductsCache.set(cacheKey, { products: allInCat, timestamp: Date.now() });
+      categoryProductsCache.set(category, allInCat);
     }
 
     const lowerQuery = search.toLowerCase();

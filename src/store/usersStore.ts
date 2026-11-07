@@ -1,6 +1,10 @@
 import { create } from 'zustand';
 import { UsersStore } from '@/types/users';
-import { fetchUsers as apiFetchUsers, fetchUserById as apiFetchUserById } from '@/lib/api';
+import {
+  fetchUsers as apiFetchUsers,
+  fetchUserById as apiFetchUserById,
+  isCancelledError,
+} from '@/lib/api';
 
 let activeUsersAbortController: AbortController | null = null;
 let activeUsersRequestId = 0;
@@ -62,8 +66,8 @@ export const useUsersStore = create<UsersStore>((set, get) => ({
         });
       }
     } catch (err: unknown) {
-      if (err instanceof DOMException && err.name === 'AbortError') {
-        // Request was intentionally superseded; discard cleanly
+      if (isCancelledError(err)) {
+        // Request was intentionally superseded; discard cleanly without setting error
         return;
       }
       if (requestId === activeUsersRequestId) {
@@ -99,7 +103,7 @@ export const useUsersStore = create<UsersStore>((set, get) => ({
         });
       }
     } catch (err: unknown) {
-      if (err instanceof DOMException && err.name === 'AbortError') {
+      if (isCancelledError(err)) {
         // Request superseded by newer user navigation; do not overwrite UI state
         return;
       }
@@ -116,7 +120,24 @@ export const useUsersStore = create<UsersStore>((set, get) => ({
     }
   },
 
-  clearSelectedUser: () => set({ selectedUser: null }),
+  cancelUserDetailRequest: () => {
+    if (activeUserDetailAbortController) {
+      activeUserDetailAbortController.abort();
+      activeUserDetailAbortController = null;
+    }
+    activeUserDetailRequestId++;
+    set({ isLoadingDetail: false });
+  },
+
+  clearSelectedUser: () => {
+    if (activeUserDetailAbortController) {
+      activeUserDetailAbortController.abort();
+      activeUserDetailAbortController = null;
+    }
+    activeUserDetailRequestId++;
+    set({ selectedUser: null, isLoadingDetail: false });
+  },
+
   clearError: () => set({ error: null }),
 }));
 

@@ -78,8 +78,10 @@ export interface ProductsActions {
   setPagination: (page: number, limit?: number) => void;
   fetchProducts: () => Promise<void>;
   fetchCategories: (force?: boolean) => Promise<void>;
+  cancelCategoriesRequest: () => void;
   clearCategoryError: () => void;
   fetchProductById: (id: number | string) => Promise<void>;
+  cancelProductDetailRequest: () => void;
   clearSelectedProduct: () => void;
   clearError: () => void;
 }

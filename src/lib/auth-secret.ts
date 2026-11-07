@@ -10,6 +10,11 @@ export function getAuthSecret(
 ): string {
   const secret = envSecret;
 
+  // During Next.js production build phase, permit a placeholder if secrets are injected at deploy-time runtime
+  if (process.env.NEXT_PHASE === 'phase-production-build' && !secret) {
+    return 'build-time-secret-placeholder-for-static-page-generation-32chars';
+  }
+
   if (envNodeEnv === 'production') {
     if (
       !secret ||

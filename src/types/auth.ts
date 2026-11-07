@@ -48,6 +48,8 @@ export type AuthErrorCode =
   | 'TIMEOUT'
   | 'SERVICE_UNAVAILABLE'
   | 'MALFORMED_RESPONSE'
+  | 'REQUEST_CANCELLED'
+  | 'HTTP_ERROR'
   | 'UNKNOWN_ERROR';
 
 // Module augmentation for next-auth
@@ -69,6 +71,7 @@ declare module 'next-auth' {
     image: string;
     accessToken?: string;
     refreshToken?: string;
+    expiresInMins?: number;
   }
 }
 

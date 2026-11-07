@@ -4,6 +4,7 @@ import {
   fetchProducts as apiFetchProducts,
   fetchCategories as apiFetchCategories,
   fetchProductById as apiFetchProductById,
+  isCancelledError,
 } from '@/lib/api';
 
 let activeProductsAbortController: AbortController | null = null;
@@ -13,6 +14,7 @@ let activeProductDetailAbortController: AbortController | null = null;
 let activeProductDetailRequestId = 0;
 
 let activeCategoriesAbortController: AbortController | null = null;
+let activeCategoriesRequestId = 0;
 
 export const useProductsStore = create<ProductsStore>((set, get) => ({
   products: [],
@@ -52,20 +54,35 @@ export const useProductsStore = create<ProductsStore>((set, get) => ({
     const controller = new AbortController();
     activeCategoriesAbortController = controller;
 
+    const requestId = ++activeCategoriesRequestId;
     set({ isLoadingCategories: true, categoryError: null });
+
     try {
       const categories = await apiFetchCategories({ signal: controller.signal });
-      set({ categories, isLoadingCategories: false, categoryError: null });
+      if (requestId === activeCategoriesRequestId) {
+        set({ categories, isLoadingCategories: false, categoryError: null });
+      }
     } catch (err: unknown) {
-      if (err instanceof DOMException && err.name === 'AbortError') {
+      if (isCancelledError(err)) {
         return;
       }
-      const message =
-        err instanceof Error
-          ? err.message
-          : 'Failed to load product categories.';
-      set({ isLoadingCategories: false, categoryError: message });
+      if (requestId === activeCategoriesRequestId) {
+        const message =
+          err instanceof Error
+            ? err.message
+            : 'Failed to load product categories.';
+        set({ isLoadingCategories: false, categoryError: message });
+      }
     }
+  },
+
+  cancelCategoriesRequest: () => {
+    if (activeCategoriesAbortController) {
+      activeCategoriesAbortController.abort();
+      activeCategoriesAbortController = null;
+    }
+    activeCategoriesRequestId++;
+    set({ isLoadingCategories: false });
   },
 
   clearCategoryError: () => set({ categoryError: null }),
@@ -103,7 +120,7 @@ export const useProductsStore = create<ProductsStore>((set, get) => ({
         });
       }
     } catch (err: unknown) {
-      if (err instanceof DOMException && err.name === 'AbortError') {
+      if (isCancelledError(err)) {
         return;
       }
       if (requestId === activeProductsRequestId) {
@@ -139,7 +156,7 @@ export const useProductsStore = create<ProductsStore>((set, get) => ({
         });
       }
     } catch (err: unknown) {
-      if (err instanceof DOMException && err.name === 'AbortError') {
+      if (isCancelledError(err)) {
         return;
       }
       if (requestId === activeProductDetailRequestId) {
@@ -155,7 +172,23 @@ export const useProductsStore = create<ProductsStore>((set, get) => ({
     }
   },
 
-  clearSelectedProduct: () => set({ selectedProduct: null }),
+  cancelProductDetailRequest: () => {
+    if (activeProductDetailAbortController) {
+      activeProductDetailAbortController.abort();
+      activeProductDetailAbortController = null;
+    }
+    activeProductDetailRequestId++;
+    set({ isLoadingDetail: false });
+  },
+
+  clearSelectedProduct: () => {
+    if (activeProductDetailAbortController) {
+      activeProductDetailAbortController.abort();
+      activeProductDetailAbortController = null;
+    }
+    activeProductDetailRequestId++;
+    set({ selectedProduct: null, isLoadingDetail: false });
+  },
+
   clearError: () => set({ error: null }),
 }));
-

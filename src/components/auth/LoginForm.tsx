@@ -1,7 +1,7 @@
 'use client';
 
-import React, { useState, FormEvent, ChangeEvent } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import React, { useState, useEffect, useRef, FormEvent, ChangeEvent } from 'react';
+import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import { signIn } from 'next-auth/react';
 import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
@@ -19,49 +19,14 @@ import Visibility from '@mui/icons-material/Visibility';
 import VisibilityOff from '@mui/icons-material/VisibilityOff';
 import LockOutlinedIcon from '@mui/icons-material/LockOutlined';
 import PersonOutlineIcon from '@mui/icons-material/PersonOutline';
+import ArrowForwardIcon from '@mui/icons-material/ArrowForward';
+import { getSafeCallbackUrl } from '@/lib/safe-callback-url';
 
-/**
- * Validates and sanitizes callback URLs to prevent open redirects, protocol-relative attacks,
- * and dangerous URI schemes.
- */
-export function getSafeCallbackUrl(raw: string | null): string {
-  if (!raw || typeof raw !== 'string') {
-    return '/dashboard';
-  }
+// Re-export for callers expecting it from LoginForm
+export { getSafeCallbackUrl };
 
-  const trimmed = raw.trim();
-
-  // Reject empty, protocol-relative, backslash-based, or dangerous schemes
-  if (
-    trimmed === '' ||
-    trimmed.startsWith('//') ||
-    trimmed.startsWith('/\\') ||
-    trimmed.startsWith('\\') ||
-    trimmed.toLowerCase().startsWith('javascript:') ||
-    trimmed.toLowerCase().startsWith('data:') ||
-    trimmed.toLowerCase().startsWith('vbscript:')
-  ) {
-    return '/dashboard';
-  }
-
-  try {
-    const parsed = new URL(trimmed, 'http://localhost');
-
-    // Must be same origin
-    if (parsed.origin !== 'http://localhost') {
-      return '/dashboard';
-    }
-
-    // Must start with a single slash
-    if (!parsed.pathname.startsWith('/') || parsed.pathname.startsWith('//')) {
-      return '/dashboard';
-    }
-
-    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
-  } catch {
-    return '/dashboard';
-  }
-}
+export type LoginStatus = 'idle' | 'authenticating' | 'navigating' | 'navigation-recovery';
+export const NAVIGATION_RECOVERY_TIMEOUT_MS = 4000;
 
 /**
  * Standardized user-facing error message mapping.
@@ -107,18 +72,42 @@ function mapAuthError(errorCode?: string | null): string {
 export function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
+  const pathname = usePathname();
   const rawCallbackUrl = searchParams.get('callbackUrl');
   const safeCallbackUrl = getSafeCallbackUrl(rawCallbackUrl);
 
-  // Form states
+  // Form input states
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
 
-  // Status and error states
-  const [isLoading, setIsLoading] = useState(false);
+  // Explicit lifecycle states (Requirement S1-02)
+  const [loginStatus, setLoginStatus] = useState<LoginStatus>('idle');
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<{ username?: string; password?: string }>({});
+
+  const recoveryTimerRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Cleanup recovery timer on unmount
+  useEffect(() => {
+    return () => {
+      if (recoveryTimerRef.current) {
+        clearTimeout(recoveryTimerRef.current);
+      }
+    };
+  }, []);
+
+  // Navigation confirmation: if route moves away from /login or reaches destination, clear status
+  useEffect(() => {
+    if (pathname && pathname !== '/login') {
+      if (recoveryTimerRef.current) {
+        clearTimeout(recoveryTimerRef.current);
+      }
+      setLoginStatus('idle');
+    }
+  }, [pathname]);
+
+  const isBusy = loginStatus === 'authenticating' || loginStatus === 'navigating';
 
   const validateForm = (): boolean => {
     const errors: { username?: string; password?: string } = {};
@@ -159,14 +148,20 @@ export function LoginForm() {
   const handleSubmit = async (e: FormEvent<HTMLFormElement>) => {
     e.preventDefault();
 
-    // Prevent submission while already submitting
-    if (isLoading) return;
+    // S1-02 Step 1: Ignore submission if already authenticating or navigating
+    if (isBusy) return;
+
+    // In recovery state, clicking submit redirects directly to safe destination
+    if (loginStatus === 'navigation-recovery') {
+      handleProceedToDashboard();
+      return;
+    }
 
     if (!validateForm()) {
       return;
     }
 
-    setIsLoading(true);
+    setLoginStatus('authenticating');
     setErrorMessage(null);
 
     try {
@@ -176,41 +171,51 @@ export function LoginForm() {
         password,
       });
 
+      // S1-02 Step 2: Authentication failure -> return to idle, display error
       if (!result) {
         setErrorMessage('The authentication service is temporarily unavailable. Please try again later.');
-        setIsLoading(false);
+        setLoginStatus('idle');
         return;
       }
 
       if (result.error) {
         setErrorMessage(mapAuthError(result.error));
-        setIsLoading(false);
+        setLoginStatus('idle');
         return;
       }
 
+      // S1-02 Step 3: Authentication success -> set to navigating
       if (result.ok) {
-        // Perform authoritative navigation to flush client router cache
+        setLoginStatus('navigating');
+
+        // Initiate authoritative navigation
         try {
           window.location.assign(safeCallbackUrl);
         } catch {
           router.push(safeCallbackUrl);
         }
 
-        // Safety timeout ensures loading state cannot remain permanently active
-        // if browser navigation stalls or encounters an error
-        setTimeout(() => {
-          setIsLoading(false);
-        }, 4000);
+        // S1-02 Step 5: Navigation recovery fallback timer
+        recoveryTimerRef.current = setTimeout(() => {
+          setLoginStatus('navigation-recovery');
+        }, NAVIGATION_RECOVERY_TIMEOUT_MS);
       } else {
-        setIsLoading(false);
+        setLoginStatus('idle');
       }
     } catch {
       setErrorMessage('An unexpected error occurred during login. Please try again.');
-      setIsLoading(false);
+      setLoginStatus('idle');
+    }
+  };
+
+  const handleProceedToDashboard = () => {
+    if (typeof window !== 'undefined') {
+      window.location.assign(safeCallbackUrl);
     }
   };
 
   const handleFillDemo = (demoUser: string, demoPass: string) => {
+    if (isBusy) return;
     setUsername(demoUser);
     setPassword(demoPass);
     setFieldErrors({});
@@ -276,6 +281,7 @@ export function LoginForm() {
               variant="outlined"
               onClick={() => handleFillDemo('emilys', 'emilyspass')}
               clickable
+              disabled={isBusy}
             />
             <Chip
               size="small"
@@ -283,9 +289,31 @@ export function LoginForm() {
               variant="outlined"
               onClick={() => handleFillDemo('michaelw', 'michaelwpass')}
               clickable
+              disabled={isBusy}
             />
           </Box>
         </Box>
+
+        {/* S1-02 Navigation Recovery Alert */}
+        {loginStatus === 'navigation-recovery' && (
+          <Alert
+            severity="info"
+            sx={{ mb: 2.5 }}
+            action={
+              <Button
+                color="primary"
+                size="small"
+                variant="contained"
+                onClick={handleProceedToDashboard}
+                endIcon={<ArrowForwardIcon />}
+              >
+                Proceed
+              </Button>
+            }
+          >
+            Authentication succeeded! Click Proceed to open your dashboard.
+          </Alert>
+        )}
 
         {/* Error message alert */}
         {errorMessage && (
@@ -309,7 +337,7 @@ export function LoginForm() {
             onChange={handleUsernameChange}
             error={Boolean(fieldErrors.username)}
             helperText={fieldErrors.username}
-            disabled={isLoading}
+            disabled={isBusy || loginStatus === 'navigation-recovery'}
             InputProps={{
               startAdornment: (
                 <InputAdornment position="start">
@@ -332,7 +360,7 @@ export function LoginForm() {
             onChange={handlePasswordChange}
             error={Boolean(fieldErrors.password)}
             helperText={fieldErrors.password}
-            disabled={isLoading}
+            disabled={isBusy || loginStatus === 'navigation-recovery'}
             InputProps={{
               startAdornment: (
                 <InputAdornment position="start">
@@ -346,6 +374,7 @@ export function LoginForm() {
                     onClick={() => setShowPassword((prev) => !prev)}
                     edge="end"
                     size="small"
+                    disabled={isBusy || loginStatus === 'navigation-recovery'}
                   >
                     {showPassword ? <VisibilityOff fontSize="small" /> : <Visibility fontSize="small" />}
                   </IconButton>
@@ -359,7 +388,7 @@ export function LoginForm() {
             fullWidth
             variant="contained"
             size="large"
-            disabled={isLoading}
+            disabled={isBusy}
             sx={{
               mt: 3,
               mb: 1,
@@ -367,11 +396,18 @@ export function LoginForm() {
               position: 'relative',
             }}
           >
-            {isLoading ? (
+            {loginStatus === 'authenticating' ? (
               <>
-                <CircularProgress size={24} color="inherit" sx={{ mr: 1 }} />
-                Signing in...
+                <CircularProgress size={22} color="inherit" sx={{ mr: 1 }} />
+                Verifying credentials...
               </>
+            ) : loginStatus === 'navigating' ? (
+              <>
+                <CircularProgress size={22} color="inherit" sx={{ mr: 1 }} />
+                Opening Dashboard...
+              </>
+            ) : loginStatus === 'navigation-recovery' ? (
+              'Proceed to Dashboard'
             ) : (
               'Sign In'
             )}

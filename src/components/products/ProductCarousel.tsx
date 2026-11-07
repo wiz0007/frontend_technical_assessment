@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import Box from '@mui/material/Box';
 import IconButton from '@mui/material/IconButton';
 import Typography from '@mui/material/Typography';
@@ -8,35 +8,45 @@ import NavigateBeforeIcon from '@mui/icons-material/NavigateBefore';
 import NavigateNextIcon from '@mui/icons-material/NavigateNext';
 import BrokenImageIcon from '@mui/icons-material/BrokenImage';
 
-interface ProductCarouselProps {
+export interface ProductCarouselProps {
   images: string[];
   title: string;
+  productId?: number | string;
 }
 
-export function ProductCarousel({ images = [], title }: ProductCarouselProps) {
+export function ProductCarousel({ images = [], title, productId }: ProductCarouselProps) {
   const [currentIndex, setCurrentIndex] = useState(0);
   const [hasError, setHasError] = useState(false);
   const [thumbnailErrors, setThumbnailErrors] = useState<Record<number, boolean>>({});
 
-  const cleanImages = Array.isArray(images) ? images.filter((img) => Boolean(img)) : [];
-  const total = cleanImages.length;
+  // Ensure stable, sanitized image strings
+  const cleanImages = useMemo(() => {
+    if (!Array.isArray(images)) return [];
+    return images.filter((img): img is string => typeof img === 'string' && img.trim() !== '');
+  }, [images]);
 
-  // Requirement 5.3: Reset state when product or image list changes
+  const total = cleanImages.length;
+  const imageKey = cleanImages.join('|');
+
+  // Requirement S2-04: Reset carousel state ONLY when product identity or image collection content changes
   useEffect(() => {
     setCurrentIndex(0);
     setHasError(false);
     setThumbnailErrors({});
-  }, [images]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productId, imageKey]);
 
-  // Clamp current index to valid bounds
+  // Clamp current index to valid bounds if collection size shrinks
   const safeIndex = total > 0 ? Math.min(Math.max(0, currentIndex), total - 1) : 0;
 
   const handlePrev = () => {
+    if (total <= 1) return;
     setCurrentIndex((prev) => (prev === 0 ? total - 1 : prev - 1));
     setHasError(false);
   };
 
   const handleNext = () => {
+    if (total <= 1) return;
     setCurrentIndex((prev) => (prev === total - 1 ? 0 : prev + 1));
     setHasError(false);
   };
@@ -50,6 +60,7 @@ export function ProductCarousel({ images = [], title }: ProductCarouselProps) {
     setThumbnailErrors((prev) => ({ ...prev, [index]: true }));
   };
 
+  // Case: No usable images or thumbnails exist
   if (total === 0) {
     return (
       <Box
@@ -114,7 +125,7 @@ export function ProductCarousel({ images = [], title }: ProductCarouselProps) {
           />
         )}
 
-        {/* Previous Button */}
+        {/* Previous Button: Only rendered if multiple images exist */}
         {total > 1 && (
           <IconButton
             onClick={handlePrev}
@@ -134,7 +145,7 @@ export function ProductCarousel({ images = [], title }: ProductCarouselProps) {
           </IconButton>
         )}
 
-        {/* Next Button */}
+        {/* Next Button: Only rendered if multiple images exist */}
         {total > 1 && (
           <IconButton
             onClick={handleNext}
@@ -154,7 +165,7 @@ export function ProductCarousel({ images = [], title }: ProductCarouselProps) {
           </IconButton>
         )}
 
-        {/* Indicator badge */}
+        {/* Indicator badge: Only rendered if multiple images exist */}
         {total > 1 && (
           <Box
             sx={{
@@ -175,7 +186,7 @@ export function ProductCarousel({ images = [], title }: ProductCarouselProps) {
         )}
       </Box>
 
-      {/* Thumbnails Strip */}
+      {/* Thumbnails Strip: Only rendered if multiple images exist */}
       {total > 1 && (
         <Box
           display="flex"
@@ -238,4 +249,3 @@ export function ProductCarousel({ images = [], title }: ProductCarouselProps) {
     </Box>
   );
 }
-
