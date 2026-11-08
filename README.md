@@ -96,7 +96,7 @@ Set the following values in `.env.local`:
 
 ```env
 NEXTAUTH_URL=http://localhost:3000
-NEXTAUTH_SECRET=replace-with-a-random-secret-at-least-32-characters-long
+NEXTAUTH_SECRET=y7g4f5der4gt5b4vf4de5fg5bv5ds5we
 NEXT_PUBLIC_API_URL=https://dummyjson.com
 ```
 
