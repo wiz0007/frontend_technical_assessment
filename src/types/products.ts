@@ -68,7 +68,8 @@ export interface ProductsState {
   isLoading: boolean;
   isLoadingCategories: boolean;
   isLoadingDetail: boolean;
-  error: string | null;
+  listError: string | null;
+  detailError: string | null;
   categoryError: string | null;
 }
 
@@ -76,14 +77,15 @@ export interface ProductsActions {
   setSearchQuery: (query: string) => void;
   setSelectedCategory: (category: string) => void;
   setPagination: (page: number, limit?: number) => void;
-  fetchProducts: () => Promise<void>;
+  fetchProducts: (force?: boolean) => Promise<void>;
   fetchCategories: (force?: boolean) => Promise<void>;
   cancelCategoriesRequest: () => void;
   clearCategoryError: () => void;
   fetchProductById: (id: number | string) => Promise<void>;
   cancelProductDetailRequest: () => void;
   clearSelectedProduct: () => void;
-  clearError: () => void;
+  clearListError: () => void;
+  clearDetailError: () => void;
 }
 
 export type ProductsStore = ProductsState & ProductsActions;

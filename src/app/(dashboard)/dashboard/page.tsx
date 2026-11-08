@@ -73,9 +73,6 @@ export default function DashboardPage() {
             sx={{ fontWeight: 600 }}
           />
         </Box>
-        <Typography variant="body1" color="text.secondary">
-          Help Study Abroad Admin Dashboard &mdash; Sprint 1 Foundation Architecture.
-        </Typography>
       </Box>
 
       <Grid container spacing={3}>
@@ -85,9 +82,6 @@ export default function DashboardPage() {
             <CardContent sx={{ p: 3 }}>
               <Typography variant="h6" fontWeight={600} gutterBottom>
                 Authenticated Profile
-              </Typography>
-              <Typography variant="body2" color="text.secondary" mb={3}>
-                Session identity retrieved from DummyJSON authentication provider.
               </Typography>
 
               <Box display="flex" alignItems="center" gap={2} mb={3}>
@@ -164,15 +158,12 @@ export default function DashboardPage() {
           </Card>
         </Grid>
 
-        {/* Foundation & Architecture Status */}
+        {/* Application Overview */}
         <Grid item xs={12} md={7}>
           <Card elevation={0} sx={{ height: '100%' }}>
             <CardContent sx={{ p: 3 }}>
               <Typography variant="h6" fontWeight={600} gutterBottom>
-                Sprint 1 Architecture Status
-              </Typography>
-              <Typography variant="body2" color="text.secondary" mb={3}>
-                Core operational layers initialized for subsequent development phases.
+                Application Overview
               </Typography>
 
               <Grid container spacing={2}>
@@ -255,7 +246,7 @@ export default function DashboardPage() {
                     <Box display="flex" alignItems="center" gap={1} mb={1}>
                       <LayersIcon color="primary" fontSize="small" />
                       <Typography variant="subtitle2" fontWeight={600}>
-                        Sprint 2 Foundation
+                        Data Management
                       </Typography>
                     </Box>
                     <Typography variant="caption" color="text.secondary">

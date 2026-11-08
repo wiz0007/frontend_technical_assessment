@@ -1,143 +1,85 @@
 import { create } from 'zustand';
-import { UsersStore } from '@/types/users';
-import {
-  fetchUsers as apiFetchUsers,
-  fetchUserById as apiFetchUserById,
-  isCancelledError,
-} from '@/lib/api';
+import type { UsersStore } from '@/types/users';
+import { fetchUsers as apiFetchUsers, fetchUserById as apiFetchUserById, isCancelledError } from '@/lib/api';
+import { ListResponseCache } from '@/lib/list-cache';
+import type { UsersResponse } from '@/types/users';
+import { rankSearchResults } from '@/lib/search-ranking';
 
-let activeUsersAbortController: AbortController | null = null;
-let activeUsersRequestId = 0;
+const usersListCache = new ListResponseCache<UsersResponse>({ ttlMs: 60_000, maxEntries: 100 });
+const usersCacheKey = (limit: number, skip: number, search: string) => `${limit}:${skip}:${search.trim().toLowerCase()}`;
 
-let activeUserDetailAbortController: AbortController | null = null;
-let activeUserDetailRequestId = 0;
+let listController: AbortController | null = null;
+let listRequestId = 0;
+let detailController: AbortController | null = null;
+let detailRequestId = 0;
 
 export const useUsersStore = create<UsersStore>((set, get) => ({
-  users: [],
-  selectedUser: null,
-  total: 0,
-  limit: 10,
-  skip: 0,
-  searchQuery: '',
-  isLoading: false,
-  isLoadingDetail: false,
-  error: null,
-
-  setSearchQuery: (query: string) => {
-    // Reset to page 1 whenever search query changes
-    set({ searchQuery: query, skip: 0 });
+  users: [], selectedUser: null, total: 0, limit: 10, skip: 0, searchQuery: '',
+  isLoading: false, isLoadingDetail: false, listError: null, detailError: null,
+  setSearchQuery: (query) => set({ searchQuery: query, skip: 0 }),
+  setPagination: (page, newLimit) => {
+    const limit = newLimit ?? get().limit;
+    set({ skip: Math.max(0, (page - 1) * limit), limit });
   },
-
-  setPagination: (page: number, newLimit?: number) => {
-    const currentLimit = newLimit ?? get().limit;
-    const newSkip = Math.max(0, (page - 1) * currentLimit);
-    set({ skip: newSkip, limit: currentLimit });
-  },
-
-  fetchUsers: async () => {
-    if (activeUsersAbortController) {
-      activeUsersAbortController.abort();
-    }
-    const controller = new AbortController();
-    activeUsersAbortController = controller;
-
-    const requestId = ++activeUsersRequestId;
+  fetchUsers: async (force = false) => {
+    listController?.abort();
+    const controller = new AbortController(); listController = controller;
+    const requestId = ++listRequestId;
     const { limit, skip, searchQuery } = get();
-
-    set({ isLoading: true, error: null });
-
-    try {
-      const response = await apiFetchUsers(
-        {
-          limit,
-          skip,
-          search: searchQuery,
-        },
-        { signal: controller.signal }
-      );
-
-      // Avoid race conditions: only update if this is the latest request
-      if (requestId === activeUsersRequestId) {
-        set({
-          users: response.users,
-          total: response.total,
-          isLoading: false,
-          error: null,
-        });
-      }
-    } catch (err: unknown) {
-      if (isCancelledError(err)) {
-        // Request was intentionally superseded; discard cleanly without setting error
+    const cacheKey = usersCacheKey(limit, skip, searchQuery);
+    if (!force) {
+      const cached = usersListCache.get(cacheKey);
+      if (cached) {
+        set({ users: cached.users, total: cached.total, isLoading: false, listError: null });
+        listController = null;
         return;
       }
-      if (requestId === activeUsersRequestId) {
-        const message =
-          err instanceof Error
-            ? err.message
-            : 'Unable to load users. Please check your connection and try again.';
-        set({
-          error: message,
-          isLoading: false,
-        });
-      }
+    }
+    set({ isLoading: true, listError: null });
+    try {
+      const response = await apiFetchUsers({ limit, skip, search: searchQuery }, { signal: controller.signal });
+      if (requestId !== listRequestId) return;
+      const rankedUsers = searchQuery
+        ? rankSearchResults(response.users, searchQuery,
+            (user) => `${user.firstName} ${user.lastName}`,
+            (user) => `${user.username} ${user.email} ${user.phone} ${user.company?.name ?? ''}`)
+        : response.users;
+      const rankedResponse = { ...response, users: rankedUsers };
+      usersListCache.set(cacheKey, rankedResponse);
+      set({ users: rankedResponse.users, total: rankedResponse.total, isLoading: false, listError: null });
+    } catch (err) {
+      if (requestId !== listRequestId) return;
+      if (isCancelledError(err)) { set({ isLoading: false }); return; }
+      set({ listError: err instanceof Error ? err.message : 'Unable to load users. Please try again.', isLoading: false });
+    } finally {
+      if (requestId === listRequestId) listController = null;
     }
   },
-
-  fetchUserById: async (id: number | string) => {
-    if (activeUserDetailAbortController) {
-      activeUserDetailAbortController.abort();
-    }
-    const controller = new AbortController();
-    activeUserDetailAbortController = controller;
-
-    const requestId = ++activeUserDetailRequestId;
-    set({ isLoadingDetail: true, error: null, selectedUser: null });
-
+  fetchUserById: async (id) => {
+    detailController?.abort();
+    const controller = new AbortController(); detailController = controller;
+    const requestId = ++detailRequestId;
+    set({ isLoadingDetail: true, detailError: null, selectedUser: null });
     try {
       const user = await apiFetchUserById(id, { signal: controller.signal });
-      if (requestId === activeUserDetailRequestId) {
-        set({
-          selectedUser: user,
-          isLoadingDetail: false,
-          error: null,
-        });
-      }
-    } catch (err: unknown) {
-      if (isCancelledError(err)) {
-        // Request superseded by newer user navigation; do not overwrite UI state
-        return;
-      }
-      if (requestId === activeUserDetailRequestId) {
-        const message =
-          err instanceof Error
-            ? err.message
-            : `Failed to load details for user #${id}.`;
-        set({
-          error: message,
-          isLoadingDetail: false,
-        });
-      }
+      if (requestId !== detailRequestId) return;
+      set({ selectedUser: user, isLoadingDetail: false, detailError: null });
+    } catch (err) {
+      if (requestId !== detailRequestId) return;
+      if (isCancelledError(err)) { set({ isLoadingDetail: false }); return; }
+      set({ detailError: err instanceof Error ? err.message : `Failed to load user #${id}.`, isLoadingDetail: false });
+    } finally {
+      if (requestId === detailRequestId) detailController = null;
     }
   },
-
   cancelUserDetailRequest: () => {
-    if (activeUserDetailAbortController) {
-      activeUserDetailAbortController.abort();
-      activeUserDetailAbortController = null;
-    }
-    activeUserDetailRequestId++;
+    detailRequestId++; detailController?.abort(); detailController = null;
     set({ isLoadingDetail: false });
   },
-
   clearSelectedUser: () => {
-    if (activeUserDetailAbortController) {
-      activeUserDetailAbortController.abort();
-      activeUserDetailAbortController = null;
-    }
-    activeUserDetailRequestId++;
-    set({ selectedUser: null, isLoadingDetail: false });
+    detailRequestId++; detailController?.abort(); detailController = null;
+    set({ selectedUser: null, isLoadingDetail: false, detailError: null });
   },
-
-  clearError: () => set({ error: null }),
+  clearListError: () => set({ listError: null }),
+  clearDetailError: () => set({ detailError: null }),
 }));
-

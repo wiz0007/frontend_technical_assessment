@@ -188,16 +188,17 @@ export function LoginForm() {
       if (result.ok) {
         setLoginStatus('navigating');
 
-        // Initiate authoritative navigation
+        // Use the App Router for an observable client-side route transition.
+        // The timer only reveals a recovery action; it does not assert that navigation failed.
         try {
-          window.location.assign(safeCallbackUrl);
-        } catch {
           router.push(safeCallbackUrl);
-        }
-
-        // S1-02 Step 5: Navigation recovery fallback timer
-        recoveryTimerRef.current = setTimeout(() => {
+        } catch {
           setLoginStatus('navigation-recovery');
+          return;
+        }
+        if (recoveryTimerRef.current) clearTimeout(recoveryTimerRef.current);
+        recoveryTimerRef.current = setTimeout(() => {
+          setLoginStatus((current) => current === 'navigating' ? 'navigation-recovery' : current);
         }, NAVIGATION_RECOVERY_TIMEOUT_MS);
       } else {
         setLoginStatus('idle');
@@ -209,9 +210,21 @@ export function LoginForm() {
   };
 
   const handleProceedToDashboard = () => {
-    if (typeof window !== 'undefined') {
-      window.location.assign(safeCallbackUrl);
+    if (recoveryTimerRef.current) {
+      clearTimeout(recoveryTimerRef.current);
+      recoveryTimerRef.current = null;
     }
+    setLoginStatus('navigating');
+    try {
+      router.replace(safeCallbackUrl);
+    } catch {
+      setLoginStatus('navigation-recovery');
+      return;
+    }
+    // If the route still has not changed, expose the recovery action again.
+    recoveryTimerRef.current = setTimeout(() => {
+      setLoginStatus((current) => current === 'navigating' ? 'navigation-recovery' : current);
+    }, NAVIGATION_RECOVERY_TIMEOUT_MS);
   };
 
   const handleFillDemo = (demoUser: string, demoPass: string) => {
@@ -228,6 +241,8 @@ export function LoginForm() {
       sx={{
         width: '100%',
         maxWidth: 440,
+        minWidth: 0,
+        overflow: 'hidden',
         mx: 'auto',
         borderRadius: 3,
         border: '1px solid',
@@ -236,7 +251,7 @@ export function LoginForm() {
         boxShadow: '0 4px 20px -2px rgba(15, 23, 42, 0.08)',
       }}
     >
-      <CardContent sx={{ p: { xs: 3, sm: 4 } }}>
+      <CardContent sx={{ p: { xs: 2, sm: 4 }, minWidth: 0, boxSizing: 'border-box' }}>
         {/* Branding & Header */}
         <Box textAlign="center" mb={3}>
           <Box
@@ -251,11 +266,11 @@ export function LoginForm() {
           >
             <SchoolIcon fontSize="large" />
           </Box>
-          <Typography variant="h5" component="h1" fontWeight={700} color="text.primary">
+          <Typography variant="h5" component="h1" fontWeight={700} color="text.primary" sx={{ fontSize: { xs: '1.35rem', sm: '1.5rem' }, lineHeight: 1.25, overflowWrap: 'break-word' }}>
             Help Study Abroad
           </Typography>
           <Typography variant="body2" color="text.secondary" mt={0.5}>
-            Admin Portal &bull; Sprint 1 Foundation
+            Admin Portal
           </Typography>
         </Box>
 
@@ -273,7 +288,7 @@ export function LoginForm() {
           <Typography variant="caption" display="block" color="text.secondary" mb={1} fontWeight={600}>
             DEMO CREDENTIALS (DUMMYJSON API):
           </Typography>
-          <Box display="flex" gap={1} flexWrap="wrap">
+          <Box sx={{ display: 'flex', gap: 1, flexWrap: 'wrap', minWidth: 0, '& .MuiChip-root': { maxWidth: '100%' }, '& .MuiChip-label': { whiteSpace: 'normal', overflowWrap: 'anywhere' } }}>
             <Chip
               size="small"
               label="emilys / emilyspass"
@@ -323,7 +338,7 @@ export function LoginForm() {
         )}
 
         {/* Login Form */}
-        <Box component="form" onSubmit={handleSubmit} noValidate>
+        <Box component="form" onSubmit={handleSubmit} noValidate sx={{ width: '100%', minWidth: 0, '& .MuiFormControl-root': { minWidth: 0, maxWidth: '100%' } }}>
           <TextField
             margin="normal"
             required
@@ -393,7 +408,15 @@ export function LoginForm() {
               mt: 3,
               mb: 1,
               py: 1.25,
+              px: { xs: 1, sm: 2 },
+              width: '100%',
+              minWidth: 0,
+              maxWidth: '100%',
               position: 'relative',
+              whiteSpace: 'nowrap',
+              wordBreak: 'normal',
+              overflowWrap: 'normal',
+              '& .MuiButton-startIcon': { flexShrink: 0 },
             }}
           >
             {loginStatus === 'authenticating' ? (

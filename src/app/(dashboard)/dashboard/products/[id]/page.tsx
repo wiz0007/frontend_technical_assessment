@@ -34,7 +34,7 @@ export default function ProductDetailPage() {
 
   const selectedProduct = useProductsStore((s) => s.selectedProduct);
   const isLoading = useProductsStore((s) => s.isLoadingDetail);
-  const error = useProductsStore((s) => s.error);
+  const error = useProductsStore((s) => s.detailError);
   const fetchProductById = useProductsStore((s) => s.fetchProductById);
   const clearSelectedProduct = useProductsStore((s) => s.clearSelectedProduct);
 

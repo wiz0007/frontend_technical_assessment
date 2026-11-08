@@ -37,7 +37,7 @@ export default function ProductsPage() {
   const selectedCategory = useProductsStore((s) => s.selectedCategory);
   const isLoading = useProductsStore((s) => s.isLoading);
   const isLoadingCategories = useProductsStore((s) => s.isLoadingCategories);
-  const error = useProductsStore((s) => s.error);
+  const error = useProductsStore((s) => s.listError);
   const categoryError = useProductsStore((s) => s.categoryError);
 
   const setSearchQuery = useProductsStore((s) => s.setSearchQuery);
@@ -45,7 +45,7 @@ export default function ProductsPage() {
   const setPagination = useProductsStore((s) => s.setPagination);
   const fetchProducts = useProductsStore((s) => s.fetchProducts);
   const fetchCategories = useProductsStore((s) => s.fetchCategories);
-  const clearError = useProductsStore((s) => s.clearError);
+  const clearError = useProductsStore((s) => s.clearListError);
 
   const [localSearch, setLocalSearch] = useState(searchQuery);
   const [, startTransition] = useTransition();
@@ -100,26 +100,114 @@ export default function ProductsPage() {
   const currentPage = Math.floor(skip / limit);
 
   return (
-    <Box>
-      {/* Page Header */}
-      <Box mb={3} display="flex" flexDirection={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ sm: 'center' }} gap={2}>
-        <Box>
-          <Typography variant="h4" component="h1" fontWeight={700}>
+    <Box sx={{ width: '100%', maxWidth: '100%', minWidth: 0, overflowX: 'clip' }}>
+      {/* Reserve layout space while keeping the toolbar fixed directly below the app navigation. */}
+      <Box aria-hidden sx={{ height: { xs: 148, sm: 72, md: 76 }, flex: '0 0 auto' }} />
+      <Box
+        sx={{
+          position: 'fixed',
+          top: { xs: 56, sm: 72, md: 76 },
+          left: { xs: 8, sm: 20, md: 284 },
+          right: { xs: 8, sm: 20, md: 24 },
+          width: 'auto',
+          zIndex: 1090,
+          bgcolor: 'background.default',
+          pt: 0.5,
+          pb: { xs: 1, sm: 1.5 },
+          boxSizing: 'border-box',
+        }}
+      >
+        <Box
+          sx={{
+            display: 'flex',
+            alignItems: 'center',
+            flexWrap: 'wrap',
+            gap: 1,
+            minWidth: 0,
+          }}
+        >
+          <Typography
+            variant="h5"
+            component="h1"
+            fontWeight={700}
+            sx={{
+              flex: { xs: '1 1 100%', sm: '0 0 auto' },
+              minWidth: 0,
+            }}
+          >
             Products Catalog
           </Typography>
-          <Typography variant="body2" color="text.secondary" mt={0.5}>
-            Explore products, filter by dynamic categories, and review pricing & inventory.
-          </Typography>
+
+          <Box
+            sx={{
+              display: 'flex',
+              alignItems: 'center',
+              flexWrap: { xs: 'wrap', sm: 'nowrap' },
+              gap: 1,
+              minWidth: 0,
+              flex: { xs: '1 1 100%', sm: '0 1 auto' },
+              ml: { sm: 'auto' },
+            }}
+          >
+            <TextField
+              size="small"
+              placeholder="Search products..."
+              value={localSearch}
+              onChange={(e) => setLocalSearch(e.target.value)}
+              sx={{
+                width: { xs: '100%', sm: 230, md: 280 },
+                flex: { xs: '1 1 100%', sm: '0 1 230px', md: '0 1 280px' },
+                minWidth: 0,
+                '& .MuiOutlinedInput-root': { height: 40 },
+              }}
+              InputProps={{
+                startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" color="action" /></InputAdornment>,
+                endAdornment: localSearch ? <InputAdornment position="end"><IconButton size="small" onClick={handleClearSearch} edge="end" aria-label="Clear product search"><ClearIcon fontSize="small" /></IconButton></InputAdornment> : null,
+              }}
+            />
+
+            <TextField
+              select
+              size="small"
+              label="Category"
+              value={selectedCategory}
+              onChange={handleCategoryChange}
+              disabled={isLoadingCategories}
+              sx={{
+                width: { xs: 'auto', sm: 170, md: 190 },
+                flex: { xs: '1 1 130px', sm: '0 1 170px', md: '0 1 190px' },
+                minWidth: 0,
+                '& .MuiOutlinedInput-root': { height: 40 },
+              }}
+              InputProps={{
+                startAdornment: <InputAdornment position="start"><FilterListIcon fontSize="small" color="action" /></InputAdornment>,
+              }}
+            >
+              <MenuItem value=""><em>All Categories</em></MenuItem>
+              {categories.map((cat) => <MenuItem key={cat.slug} value={cat.slug}>{cat.name}</MenuItem>)}
+            </TextField>
+
+            <Button
+              variant="outlined"
+              size="small"
+              onClick={handleResetFilters}
+              disabled={!localSearch && !selectedCategory}
+              sx={{ minWidth: 64, height: 40, px: 1.25, flex: '0 0 auto' }}
+            >
+              Reset
+            </Button>
+
+            <IconButton
+              aria-label="Refresh products"
+              onClick={() => fetchProducts(true)}
+              disabled={isLoading}
+              color="primary"
+              sx={{ flex: '0 0 auto', width: 40, height: 40 }}
+            >
+              <RefreshIcon />
+            </IconButton>
+          </Box>
         </Box>
-        <Button
-          variant="outlined"
-          startIcon={<RefreshIcon />}
-          onClick={() => fetchProducts()}
-          disabled={isLoading}
-          size="small"
-        >
-          Refresh
-        </Button>
       </Box>
 
       {/* Category Error Alert with Retry */}
@@ -142,79 +230,6 @@ export default function ProductsPage() {
         </Alert>
       )}
 
-      {/* Filter & Search Bar */}
-      <Card elevation={0} sx={{ p: 2, mb: 3 }}>
-        <Grid container spacing={2} alignItems="center">
-          {/* Search Input */}
-          <Grid item xs={12} md={7}>
-            <TextField
-              fullWidth
-              size="small"
-              placeholder="Search products by title, brand, or description..."
-              value={localSearch}
-              onChange={(e) => setLocalSearch(e.target.value)}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <SearchIcon fontSize="small" color="action" />
-                  </InputAdornment>
-                ),
-                endAdornment: localSearch ? (
-                  <InputAdornment position="end">
-                    <IconButton size="small" onClick={handleClearSearch} edge="end">
-                      <ClearIcon fontSize="small" />
-                    </IconButton>
-                  </InputAdornment>
-                ) : null,
-              }}
-            />
-          </Grid>
-
-          {/* Category Filter */}
-          <Grid item xs={12} sm={6} md={3}>
-            <TextField
-              select
-              fullWidth
-              size="small"
-              label="Category"
-              value={selectedCategory}
-              onChange={handleCategoryChange}
-              disabled={isLoadingCategories}
-              InputProps={{
-                startAdornment: (
-                  <InputAdornment position="start">
-                    <FilterListIcon fontSize="small" color="action" />
-                  </InputAdornment>
-                ),
-              }}
-            >
-              <MenuItem value="">
-                <em>All Categories</em>
-              </MenuItem>
-              {categories.map((cat) => (
-                <MenuItem key={cat.slug} value={cat.slug}>
-                  {cat.name}
-                </MenuItem>
-              ))}
-            </TextField>
-          </Grid>
-
-          {/* Reset Filters Button */}
-          <Grid item xs={12} sm={6} md={2}>
-            <Button
-              fullWidth
-              variant="outlined"
-              size="medium"
-              onClick={handleResetFilters}
-              disabled={!localSearch && !selectedCategory}
-              sx={{ height: 40 }}
-            >
-              Reset
-            </Button>
-          </Grid>
-        </Grid>
-      </Card>
-
       {/* Error Message with Retry */}
       {error && (
         <ErrorMessage
@@ -230,7 +245,7 @@ export default function ProductsPage() {
       {/* Products Grid */}
       {isLoading ? (
         // Skeleton cards
-        <Grid container spacing={3}>
+        <Grid container spacing={3} sx={{ width: '100%', minWidth: 0, m: 0 }}>
           {Array.from({ length: limit > 8 ? 8 : limit }).map((_, idx) => (
             <Grid item xs={12} sm={6} md={4} lg={3} key={idx}>
               <Card elevation={0} sx={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
@@ -265,7 +280,7 @@ export default function ProductsPage() {
         </Card>
       ) : (
         // Products Cards Grid
-        <Grid container spacing={3}>
+        <Grid container spacing={3} sx={{ width: '100%', minWidth: 0, m: 0 }}>
           {products.map((product) => {
             const hasDiscount = product.discountPercentage > 0;
             const originalPrice = (product.price / (1 - product.discountPercentage / 100)).toFixed(2);
@@ -389,7 +404,7 @@ export default function ProductsPage() {
       {/* Pagination Footer */}
       <Card elevation={0} sx={{ mt: 3 }}>
         <TablePagination
-          rowsPerPageOptions={[6, 12, 24]}
+          rowsPerPageOptions={[6, 10, 20]}
           component="div"
           count={total}
           rowsPerPage={limit}

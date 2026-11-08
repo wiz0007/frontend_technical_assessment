@@ -53,315 +53,206 @@ export function isCancelledError(err: unknown): boolean {
    RUNTIME DATA VALIDATION FUNCTIONS
 ===================================================================== */
 
-/**
- * Validates the runtime payload returned by the DummyJSON auth endpoint.
- */
+function malformed(message: string): never {
+  throw new ApiError(message, 502, 'MALFORMED_RESPONSE');
+}
+
+function recordOf(value: unknown, label: string): Record<string, unknown> {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) malformed(`Invalid ${label}: expected an object.`);
+  return value as Record<string, unknown>;
+}
+
+function requiredString(record: Record<string, unknown>, key: string, label: string): string {
+  const value = record[key];
+  if (typeof value !== 'string' || value.trim() === '') malformed(`Invalid ${label}: missing or invalid ${key}.`);
+  return value.trim();
+}
+
+function requiredFiniteNumber(record: Record<string, unknown>, key: string, label: string, min = -Infinity): number {
+  const value = record[key];
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < min) malformed(`Invalid ${label}: missing or invalid ${key}.`);
+  return value;
+}
+
+function optionalString(record: Record<string, unknown>, key: string, label: string): string | undefined {
+  const value = record[key];
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'string') malformed(`Invalid ${label}: ${key} must be a string when provided.`);
+  return value;
+}
+
+function optionalFiniteNumber(record: Record<string, unknown>, key: string, label: string, min = -Infinity): number | undefined {
+  const value = record[key];
+  if (value === undefined || value === null) return undefined;
+  if (typeof value !== 'number' || !Number.isFinite(value) || value < min) malformed(`Invalid ${label}: ${key} must be a valid number when provided.`);
+  return value;
+}
+
+function optionalStringArray(record: Record<string, unknown>, key: string, label: string): string[] | undefined {
+  const value = record[key];
+  if (value === undefined || value === null) return undefined;
+  if (!Array.isArray(value) || !value.every((item) => typeof item === 'string')) malformed(`Invalid ${label}: ${key} must be an array of strings.`);
+  return value as string[];
+}
+
+function validImageUrl(value: unknown): value is string {
+  if (typeof value !== 'string' || value.trim() === '') return false;
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+  } catch {
+    return false;
+  }
+}
+
+function requiredImageUrl(record: Record<string, unknown>, key: string, label: string): string {
+  const value = record[key];
+  if (!validImageUrl(value)) malformed(`Invalid ${label}: ${key} must be an absolute HTTP(S) URL.`);
+  return value;
+}
+
+/** Validates the runtime payload returned by the DummyJSON authentication endpoint. */
 export function validateDummyJsonLoginResponse(data: unknown): DummyJsonLoginResponse {
-  if (typeof data !== 'object' || data === null) {
-    throw new ApiError(
-      'Invalid authentication response: expected an object from server.',
-      502,
-      'MALFORMED_RESPONSE'
-    );
-  }
-
-  const record = data as Record<string, unknown>;
-
-  if (typeof record.accessToken !== 'string' || record.accessToken.trim() === '') {
-    throw new ApiError(
-      'Invalid authentication response: missing or invalid access token.',
-      502,
-      'MALFORMED_RESPONSE'
-    );
-  }
-
-  const id = record.id;
-  const idNum = typeof id === 'number' ? id : parseInt(String(id), 10);
-  const isValidId = !Number.isNaN(idNum) && idNum > 0;
-  if (!isValidId) {
-    throw new ApiError(
-      'Invalid authentication response: missing or invalid user ID.',
-      502,
-      'MALFORMED_RESPONSE'
-    );
-  }
-
-  if (typeof record.username !== 'string' || record.username.trim() === '') {
-    throw new ApiError(
-      'Invalid authentication response: missing or invalid username.',
-      502,
-      'MALFORMED_RESPONSE'
-    );
-  }
-
+  const r = recordOf(data, 'authentication response');
+  const id = typeof r.id === 'number' ? r.id : (typeof r.id === 'string' && /^\d+$/.test(r.id) ? Number(r.id) : NaN);
+  if (!Number.isSafeInteger(id) || id <= 0) malformed('Invalid authentication response: missing or invalid user ID.');
   return {
-    id: id as number | string,
-    username: record.username.trim(),
-    email: typeof record.email === 'string' ? record.email.trim() : '',
-    firstName: typeof record.firstName === 'string' ? record.firstName.trim() : '',
-    lastName: typeof record.lastName === 'string' ? record.lastName.trim() : '',
-    gender: typeof record.gender === 'string' ? record.gender.trim() : '',
-    image: typeof record.image === 'string' ? record.image.trim() : '',
-    accessToken: record.accessToken,
-    refreshToken: typeof record.refreshToken === 'string' ? record.refreshToken : '',
+    id,
+    username: requiredString(r, 'username', 'authentication response'),
+    email: requiredString(r, 'email', 'authentication response'),
+    firstName: requiredString(r, 'firstName', 'authentication response'),
+    lastName: requiredString(r, 'lastName', 'authentication response'),
+    gender: requiredString(r, 'gender', 'authentication response'),
+    image: requiredImageUrl(r, 'image', 'authentication response'),
+    accessToken: requiredString(r, 'accessToken', 'authentication response'),
+    refreshToken: requiredString(r, 'refreshToken', 'authentication response'),
   };
 }
 
-/**
- * Validates an individual user profile record received from DummyJSON.
- */
+/** Validates a DummyJSON user. Optional API fields remain absent when omitted. */
 export function validateUser(data: unknown): DummyJsonUser {
-  if (typeof data !== 'object' || data === null) {
-    throw new ApiError('Invalid user data: expected an object.', 502, 'MALFORMED_RESPONSE');
+  const r = recordOf(data, 'user data');
+  const id = requiredFiniteNumber(r, 'id', 'user data', 1);
+  if (!Number.isSafeInteger(id)) malformed('Invalid user data: id must be a safe integer.');
+  const firstName = requiredString(r, 'firstName', 'user data');
+  const lastName = requiredString(r, 'lastName', 'user data');
+  const username = requiredString(r, 'username', 'user data');
+  const age = requiredFiniteNumber(r, 'age', 'user data', 0);
+  const gender = requiredString(r, 'gender', 'user data');
+  const email = requiredString(r, 'email', 'user data');
+  const phone = requiredString(r, 'phone', 'user data');
+  const image = requiredImageUrl(r, 'image', 'user data');
+
+  let hair: DummyJsonUser['hair'];
+  if (r.hair !== undefined && r.hair !== null) {
+    const h = recordOf(r.hair, 'user hair');
+    hair = { color: requiredString(h, 'color', 'user hair'), type: requiredString(h, 'type', 'user hair') };
   }
-
-  const r = data as Record<string, unknown>;
-  const id = typeof r.id === 'number' ? r.id : parseInt(String(r.id), 10);
-
-  if (!Number.isFinite(id) || id <= 0) {
-    throw new ApiError('Invalid user data: missing or malformed numeric ID.', 502, 'MALFORMED_RESPONSE');
+  let address: DummyJsonUser['address'];
+  if (r.address !== undefined && r.address !== null) {
+    const a = recordOf(r.address, 'user address');
+    address = {
+      address: requiredString(a, 'address', 'user address'), city: requiredString(a, 'city', 'user address'),
+      state: requiredString(a, 'state', 'user address'), postalCode: requiredString(a, 'postalCode', 'user address'),
+      ...(optionalString(a, 'stateCode', 'user address') !== undefined ? { stateCode: optionalString(a, 'stateCode', 'user address') } : {}),
+      ...(optionalString(a, 'country', 'user address') !== undefined ? { country: optionalString(a, 'country', 'user address') } : {}),
+    };
   }
-
-  if (typeof r.username !== 'string' || r.username.trim() === '') {
-    throw new ApiError('Invalid user data: missing or empty username.', 502, 'MALFORMED_RESPONSE');
+  let company: DummyJsonUser['company'];
+  if (r.company !== undefined && r.company !== null) {
+    const c = recordOf(r.company, 'user company');
+    company = { department: requiredString(c, 'department', 'user company'), name: requiredString(c, 'name', 'user company'), title: requiredString(c, 'title', 'user company') };
   }
-
   return {
-    id,
-    firstName: typeof r.firstName === 'string' ? r.firstName.trim() : '',
-    lastName: typeof r.lastName === 'string' ? r.lastName.trim() : '',
-    maidenName: typeof r.maidenName === 'string' ? r.maidenName.trim() : undefined,
-    age: typeof r.age === 'number' && Number.isFinite(r.age) && r.age >= 0 ? r.age : 0,
-    gender: typeof r.gender === 'string' ? r.gender.trim() : '',
-    email: typeof r.email === 'string' ? r.email.trim() : '',
-    phone: typeof r.phone === 'string' ? r.phone.trim() : '',
-    username: r.username.trim(),
-    birthDate: typeof r.birthDate === 'string' ? r.birthDate : undefined,
-    image: typeof r.image === 'string' ? r.image : '',
-    bloodGroup: typeof r.bloodGroup === 'string' ? r.bloodGroup : undefined,
-    height: typeof r.height === 'number' ? r.height : undefined,
-    weight: typeof r.weight === 'number' ? r.weight : undefined,
-    eyeColor: typeof r.eyeColor === 'string' ? r.eyeColor : undefined,
-    hair:
-      typeof r.hair === 'object' && r.hair !== null
-        ? {
-            color: String((r.hair as Record<string, unknown>).color || ''),
-            type: String((r.hair as Record<string, unknown>).type || ''),
-          }
-        : undefined,
-    address:
-      typeof r.address === 'object' && r.address !== null
-        ? {
-            address: String((r.address as Record<string, unknown>).address || ''),
-            city: String((r.address as Record<string, unknown>).city || ''),
-            state: String((r.address as Record<string, unknown>).state || ''),
-            stateCode: (r.address as Record<string, unknown>).stateCode
-              ? String((r.address as Record<string, unknown>).stateCode)
-              : undefined,
-            postalCode: String((r.address as Record<string, unknown>).postalCode || ''),
-            country: (r.address as Record<string, unknown>).country
-              ? String((r.address as Record<string, unknown>).country)
-              : undefined,
-          }
-        : undefined,
-    university: typeof r.university === 'string' ? r.university : undefined,
-    company:
-      typeof r.company === 'object' && r.company !== null
-        ? {
-            department: String((r.company as Record<string, unknown>).department || ''),
-            name: String((r.company as Record<string, unknown>).name || ''),
-            title: String((r.company as Record<string, unknown>).title || ''),
-          }
-        : undefined,
-    role: typeof r.role === 'string' ? r.role : undefined,
+    id, firstName, lastName, username, age, gender, email, phone, image,
+    maidenName: optionalString(r, 'maidenName', 'user data'),
+    birthDate: optionalString(r, 'birthDate', 'user data'),
+    bloodGroup: optionalString(r, 'bloodGroup', 'user data'),
+    height: optionalFiniteNumber(r, 'height', 'user data', 0),
+    weight: optionalFiniteNumber(r, 'weight', 'user data', 0),
+    eyeColor: optionalString(r, 'eyeColor', 'user data'), hair, address,
+    university: optionalString(r, 'university', 'user data'), company,
+    role: optionalString(r, 'role', 'user data'),
   };
 }
 
-/**
- * Validates a paginated users response from DummyJSON.
- */
-export function validateUsersResponse(
-  data: unknown,
-  fallbackSkip = 0,
-  fallbackLimit = 10
-): UsersResponse {
-  if (typeof data !== 'object' || data === null) {
-    throw new ApiError('Invalid users listing response: expected object.', 502, 'MALFORMED_RESPONSE');
-  }
-
-  const r = data as Record<string, unknown>;
-  if (!Array.isArray(r.users)) {
-    throw new ApiError(
-      'Invalid users listing response: missing or malformed users array.',
-      502,
-      'MALFORMED_RESPONSE'
-    );
-  }
-  const users = r.users.map((u) => validateUser(u));
-
-  const hasTotal = typeof r.total === 'number' && Number.isFinite(r.total) && r.total >= 0;
-  if (!hasTotal && r.total !== undefined) {
-    throw new ApiError('Invalid users listing response: malformed total count.', 502, 'MALFORMED_RESPONSE');
-  }
-  const total = hasTotal ? (r.total as number) : users.length;
-
-  const hasSkip = typeof r.skip === 'number' && Number.isFinite(r.skip) && r.skip >= 0;
-  if (!hasSkip && r.skip !== undefined) {
-    throw new ApiError('Invalid users listing response: malformed skip offset.', 502, 'MALFORMED_RESPONSE');
-  }
-  const skip = hasSkip ? (r.skip as number) : fallbackSkip;
-
-  const hasLimit = typeof r.limit === 'number' && Number.isFinite(r.limit) && r.limit > 0;
-  if (!hasLimit && r.limit !== undefined) {
-    throw new ApiError('Invalid users listing response: malformed limit.', 502, 'MALFORMED_RESPONSE');
-  }
-  const limit = hasLimit ? (r.limit as number) : fallbackLimit;
-
-  return { users, total, skip, limit };
+function validatePagination(r: Record<string, unknown>, label: string): { total: number; skip: number; limit: number } {
+  const total = requiredFiniteNumber(r, 'total', label, 0);
+  const skip = requiredFiniteNumber(r, 'skip', label, 0);
+  const limit = requiredFiniteNumber(r, 'limit', label, 0);
+  if (![total, skip, limit].every(Number.isSafeInteger)) malformed(`Invalid ${label}: pagination values must be safe integers.`);
+  return { total, skip, limit };
 }
 
-/**
- * Validates an individual product record from DummyJSON.
- */
+export function validateUsersResponse(data: unknown, _expectedSkip?: number, _expectedLimit?: number): UsersResponse {
+  const r = recordOf(data, 'users listing response');
+  if (!Array.isArray(r.users)) malformed('Invalid users listing response: users must be an array.');
+  const users = r.users.map(validateUser);
+  return { users, ...validatePagination(r, 'users listing response') };
+}
+
+/** Validates a DummyJSON product while preserving omitted optional fields. */
 export function validateProduct(data: unknown): DummyJsonProduct {
-  if (typeof data !== 'object' || data === null) {
-    throw new ApiError('Invalid product data: expected an object.', 502, 'MALFORMED_RESPONSE');
+  const r = recordOf(data, 'product data');
+  const id = requiredFiniteNumber(r, 'id', 'product data', 1);
+  if (!Number.isSafeInteger(id)) malformed('Invalid product data: id must be a safe integer.');
+  const title = requiredString(r, 'title', 'product data');
+  const description = requiredString(r, 'description', 'product data');
+  const category = requiredString(r, 'category', 'product data');
+  const price = requiredFiniteNumber(r, 'price', 'product data', 0);
+  const discountPercentage = requiredFiniteNumber(r, 'discountPercentage', 'product data', 0);
+  const rating = requiredFiniteNumber(r, 'rating', 'product data', 0);
+  const stock = requiredFiniteNumber(r, 'stock', 'product data', 0);
+  if (rating > 5 || discountPercentage > 100) malformed('Invalid product data: rating or discountPercentage is out of range.');
+  if (!Array.isArray(r.images) || !r.images.every(validImageUrl)) malformed('Invalid product data: images must contain only absolute HTTP(S) URLs.');
+  const thumbnail = requiredImageUrl(r, 'thumbnail', 'product data');
+  const tags = optionalStringArray(r, 'tags', 'product data');
+  const weight = optionalFiniteNumber(r, 'weight', 'product data', 0);
+  const minimumOrderQuantity = optionalFiniteNumber(r, 'minimumOrderQuantity', 'product data', 1);
+  let dimensions: DummyJsonProduct['dimensions'];
+  if (r.dimensions !== undefined && r.dimensions !== null) {
+    const d = recordOf(r.dimensions, 'product dimensions');
+    dimensions = { width: requiredFiniteNumber(d, 'width', 'product dimensions', 0), height: requiredFiniteNumber(d, 'height', 'product dimensions', 0), depth: requiredFiniteNumber(d, 'depth', 'product dimensions', 0) };
   }
-
-  const r = data as Record<string, unknown>;
-  const id = typeof r.id === 'number' ? r.id : parseInt(String(r.id), 10);
-
-  if (!Number.isFinite(id) || id <= 0) {
-    throw new ApiError('Invalid product data: missing or malformed numeric ID.', 502, 'MALFORMED_RESPONSE');
+  let reviews: DummyJsonProduct['reviews'];
+  if (r.reviews !== undefined && r.reviews !== null) {
+    if (!Array.isArray(r.reviews)) malformed('Invalid product data: reviews must be an array.');
+    reviews = r.reviews.map((review) => {
+      const rev = recordOf(review, 'product review');
+      const reviewRating = requiredFiniteNumber(rev, 'rating', 'product review', 1);
+      if (reviewRating > 5) malformed('Invalid product review: rating must not exceed 5.');
+      const date = requiredString(rev, 'date', 'product review');
+      if (Number.isNaN(Date.parse(date))) malformed('Invalid product review: date must be valid.');
+      return { rating: reviewRating, comment: requiredString(rev, 'comment', 'product review'), reviewerName: requiredString(rev, 'reviewerName', 'product review'), reviewerEmail: requiredString(rev, 'reviewerEmail', 'product review'), date };
+    });
   }
-
-  if (typeof r.title !== 'string' || r.title.trim() === '') {
-    throw new ApiError('Invalid product data: missing or empty title.', 502, 'MALFORMED_RESPONSE');
-  }
-
-  if (typeof r.price !== 'number' || !Number.isFinite(r.price) || r.price < 0) {
-    throw new ApiError('Invalid product data: missing or invalid numeric price.', 502, 'MALFORMED_RESPONSE');
-  }
-
-  if (typeof r.category !== 'string' || r.category.trim() === '') {
-    throw new ApiError('Invalid product data: missing or empty category.', 502, 'MALFORMED_RESPONSE');
-  }
-
-  const rawImages = Array.isArray(r.images)
-    ? (r.images.filter((img) => typeof img === 'string' && img.trim() !== '') as string[])
-    : [];
-
   return {
-    id,
-    title: r.title.trim(),
-    description: typeof r.description === 'string' ? r.description.trim() : '',
-    category: r.category.trim(),
-    price: r.price,
-    discountPercentage:
-      typeof r.discountPercentage === 'number' && Number.isFinite(r.discountPercentage)
-        ? r.discountPercentage
-        : 0,
-    rating: typeof r.rating === 'number' && Number.isFinite(r.rating) ? r.rating : 0,
-    stock: typeof r.stock === 'number' && Number.isFinite(r.stock) ? r.stock : 0,
-    tags: Array.isArray(r.tags) ? (r.tags.filter((t) => typeof t === 'string') as string[]) : undefined,
-    brand: typeof r.brand === 'string' ? r.brand.trim() : undefined,
-    sku: typeof r.sku === 'string' ? r.sku.trim() : undefined,
-    weight: typeof r.weight === 'number' ? r.weight : undefined,
-    dimensions:
-      typeof r.dimensions === 'object' && r.dimensions !== null
-        ? {
-            width: Number((r.dimensions as Record<string, unknown>).width) || 0,
-            height: Number((r.dimensions as Record<string, unknown>).height) || 0,
-            depth: Number((r.dimensions as Record<string, unknown>).depth) || 0,
-          }
-        : undefined,
-    warrantyInformation: typeof r.warrantyInformation === 'string' ? r.warrantyInformation : undefined,
-    shippingInformation: typeof r.shippingInformation === 'string' ? r.shippingInformation : undefined,
-    availabilityStatus: typeof r.availabilityStatus === 'string' ? r.availabilityStatus : undefined,
-    reviews: Array.isArray(r.reviews)
-      ? r.reviews.map((rev) => {
-          const robj = typeof rev === 'object' && rev !== null ? (rev as Record<string, unknown>) : {};
-          return {
-            rating: typeof robj.rating === 'number' ? robj.rating : 5,
-            comment: typeof robj.comment === 'string' ? robj.comment : '',
-            date: typeof robj.date === 'string' ? robj.date : '',
-            reviewerName: typeof robj.reviewerName === 'string' ? robj.reviewerName : 'Customer',
-            reviewerEmail: typeof robj.reviewerEmail === 'string' ? robj.reviewerEmail : '',
-          };
-        })
-      : undefined,
-    returnPolicy: typeof r.returnPolicy === 'string' ? r.returnPolicy : undefined,
-    minimumOrderQuantity: typeof r.minimumOrderQuantity === 'number' ? r.minimumOrderQuantity : undefined,
-    images: rawImages,
-    thumbnail: typeof r.thumbnail === 'string' ? r.thumbnail : rawImages[0] || '',
+    id, title, description, category, price, discountPercentage, rating, stock,
+    images: r.images as string[], thumbnail, tags, weight, dimensions, reviews,
+    brand: optionalString(r, 'brand', 'product data'), sku: optionalString(r, 'sku', 'product data'),
+    warrantyInformation: optionalString(r, 'warrantyInformation', 'product data'),
+    shippingInformation: optionalString(r, 'shippingInformation', 'product data'),
+    availabilityStatus: optionalString(r, 'availabilityStatus', 'product data'),
+    returnPolicy: optionalString(r, 'returnPolicy', 'product data'), minimumOrderQuantity,
   };
 }
 
-/**
- * Validates a paginated products response from DummyJSON.
- */
-export function validateProductsResponse(
-  data: unknown,
-  fallbackSkip = 0,
-  fallbackLimit = 12
-): ProductsResponse {
-  if (typeof data !== 'object' || data === null) {
-    throw new ApiError('Invalid products listing response: expected object.', 502, 'MALFORMED_RESPONSE');
-  }
-
-  const r = data as Record<string, unknown>;
-  if (!Array.isArray(r.products)) {
-    throw new ApiError(
-      'Invalid products listing response: missing or malformed products array.',
-      502,
-      'MALFORMED_RESPONSE'
-    );
-  }
-  const products = r.products.map((p) => validateProduct(p));
-
-  const hasTotal = typeof r.total === 'number' && Number.isFinite(r.total) && r.total >= 0;
-  if (!hasTotal && r.total !== undefined) {
-    throw new ApiError('Invalid products listing response: malformed total count.', 502, 'MALFORMED_RESPONSE');
-  }
-  const total = hasTotal ? (r.total as number) : products.length;
-
-  const hasSkip = typeof r.skip === 'number' && Number.isFinite(r.skip) && r.skip >= 0;
-  if (!hasSkip && r.skip !== undefined) {
-    throw new ApiError('Invalid products listing response: malformed skip offset.', 502, 'MALFORMED_RESPONSE');
-  }
-  const skip = hasSkip ? (r.skip as number) : fallbackSkip;
-
-  const hasLimit = typeof r.limit === 'number' && Number.isFinite(r.limit) && r.limit > 0;
-  if (!hasLimit && r.limit !== undefined) {
-    throw new ApiError('Invalid products listing response: malformed limit.', 502, 'MALFORMED_RESPONSE');
-  }
-  const limit = hasLimit ? (r.limit as number) : fallbackLimit;
-
-  return { products, total, skip, limit };
+export function validateProductsResponse(data: unknown, _expectedSkip?: number, _expectedLimit?: number): ProductsResponse {
+  const r = recordOf(data, 'products listing response');
+  if (!Array.isArray(r.products)) malformed('Invalid products listing response: products must be an array.');
+  const products = r.products.map(validateProduct);
+  return { products, ...validatePagination(r, 'products listing response') };
 }
 
-/**
- * Validates product categories response from DummyJSON.
- */
 export function validateCategories(data: unknown): ProductCategory[] {
-  if (!Array.isArray(data)) {
-    throw new ApiError('Invalid categories response: expected array.', 502, 'MALFORMED_RESPONSE');
-  }
-
+  if (!Array.isArray(data)) malformed('Invalid categories response: expected an array.');
   return data.map((item) => {
-    if (typeof item === 'string') {
-      return {
-        slug: item,
-        name: item.charAt(0).toUpperCase() + item.slice(1).replace(/-/g, ' '),
-      };
-    }
-    if (typeof item === 'object' && item !== null) {
-      const obj = item as Record<string, unknown>;
-      const slug = String(obj.slug || '');
-      const name = String(obj.name || slug);
-      return { slug, name };
-    }
-    return { slug: String(item), name: String(item) };
+    const category = recordOf(item, 'product category');
+    const slug = requiredString(category, 'slug', 'product category');
+    const name = requiredString(category, 'name', 'product category');
+    const url = optionalString(category, 'url', 'product category');
+    if (url !== undefined && !validImageUrl(url)) malformed('Invalid product category: url must be an absolute HTTP(S) URL.');
+    return { slug, name, ...(url ? { url } : {}) };
   });
 }
 
@@ -382,7 +273,7 @@ export async function apiFetch<T>(
 
   // Validate timeout parameter
   const validTimeout =
-    typeof timeoutMs === 'number' && timeoutMs > 0 ? timeoutMs : DEFAULT_TIMEOUT_MS;
+    typeof timeoutMs === 'number' && Number.isFinite(timeoutMs) && timeoutMs > 0 ? timeoutMs : DEFAULT_TIMEOUT_MS;
 
   const controller = new AbortController();
   let isTimeout = false;
@@ -565,7 +456,7 @@ export async function fetchProducts(
   params: ProductsFilterParams = {},
   options?: RequestInit
 ): Promise<ProductsResponse> {
-  const limit = params.limit ?? 12;
+  const limit = params.limit ?? 10;
   const skip = params.skip ?? 0;
   const search = params.search?.trim();
   const category = params.category?.trim();

@@ -22,7 +22,11 @@ export function ProductCarousel({ images = [], title, productId }: ProductCarous
   // Ensure stable, sanitized image strings
   const cleanImages = useMemo(() => {
     if (!Array.isArray(images)) return [];
-    return images.filter((img): img is string => typeof img === 'string' && img.trim() !== '');
+    return images.filter((img): img is string => {
+      if (typeof img !== 'string' || img.trim() === '') return false;
+      try { const url = new URL(img); return url.protocol === 'https:' || url.protocol === 'http:'; }
+      catch { return false; }
+    });
   }, [images]);
 
   const total = cleanImages.length;

@@ -62,17 +62,19 @@ export interface UsersState {
   searchQuery: string;
   isLoading: boolean;
   isLoadingDetail: boolean;
-  error: string | null;
+  listError: string | null;
+  detailError: string | null;
 }
 
 export interface UsersActions {
   setSearchQuery: (query: string) => void;
   setPagination: (page: number, limit?: number) => void;
-  fetchUsers: () => Promise<void>;
+  fetchUsers: (force?: boolean) => Promise<void>;
   fetchUserById: (id: number | string) => Promise<void>;
   cancelUserDetailRequest: () => void;
   clearSelectedUser: () => void;
-  clearError: () => void;
+  clearListError: () => void;
+  clearDetailError: () => void;
 }
 
 export type UsersStore = UsersState & UsersActions;

@@ -181,16 +181,6 @@ export function Sidebar({ drawerWidth, mobileOpen, onDrawerClose }: SidebarProps
         </List>
       </Box>
 
-      {/* Footer Info */}
-      <Divider />
-      <Box p={2} textAlign="center">
-        <Typography variant="caption" color="text.secondary" display="block">
-          Sprint 1 &bull; v1.0.0
-        </Typography>
-        <Typography variant="caption" color="text.secondary" sx={{ fontSize: '0.7rem' }}>
-          DummyJSON Auth Integration
-        </Typography>
-      </Box>
     </Box>
   );
 

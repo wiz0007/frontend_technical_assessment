@@ -30,7 +30,7 @@ export default function UserDetailPage() {
 
   const selectedUser = useUsersStore((s) => s.selectedUser);
   const isLoading = useUsersStore((s) => s.isLoadingDetail);
-  const error = useUsersStore((s) => s.error);
+  const error = useUsersStore((s) => s.detailError);
   const fetchUserById = useUsersStore((s) => s.fetchUserById);
   const clearSelectedUser = useUsersStore((s) => s.clearSelectedUser);
 

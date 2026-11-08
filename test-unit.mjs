@@ -17,6 +17,8 @@ import {
   validateCategories,
 } from './src/lib/api.ts';
 import { CategoryCache } from './src/lib/category-cache.ts';
+import { ListResponseCache } from './src/lib/list-cache.ts';
+import { rankSearchResults } from './src/lib/search-ranking.ts';
 
 let hasFailed = false;
 let passedCount = 0;
@@ -233,6 +235,11 @@ try {
   assertEqual(reconciledNan.error, 'AccessTokenExpired', 'NaN expiry claim flags token as expired');
   assertTrue(reconciledNan.accessToken === undefined, 'NaN expiry claim purges access token');
   recordPass('reconcileTokenState flags non-finite/NaN expiry claims');
+
+  const missingExpiry = reconcileTokenState({ user: safeUser, accessToken: 'token-without-expiry' }, baseTime);
+  assertEqual(missingExpiry.error, 'AccessTokenExpired', 'Missing expiry metadata flags token as expired');
+  assertTrue(missingExpiry.accessToken === undefined, 'Missing expiry purges access token');
+  recordPass('reconcileTokenState rejects missing expiry on an existing upstream token');
 } catch (err) {
   recordFail('S1-03 Token Policy', err);
 }
@@ -279,18 +286,15 @@ try {
 
   // 2. validateUser
   const validUser = validateUser({
-    id: 10,
-    username: 'michaelw',
-    firstName: 'Michael',
-    lastName: 'Williams',
-    age: 28,
-    gender: 'male',
-    email: 'michael@example.com',
+    id: 10, username: 'michaelw', firstName: 'Michael', lastName: 'Williams', age: 28,
+    gender: 'male', email: 'michael@example.com', phone: '+1 555 0100', image: 'https://example.com/michael.png',
   });
   assertEqual(validUser.id, 10, 'User ID matches');
   assertEqual(validUser.username, 'michaelw', 'User username matches');
   assertEqual(validUser.firstName, 'Michael', 'User firstName matches');
   recordPass('validateUser accepts valid user profile');
+  assertTrue(validUser.hair === undefined && validUser.company === undefined, 'Omitted optional user objects remain absent');
+  recordPass('validateUser preserves omitted optional fields without fabricating nested objects');
 
   let missingUsernameThrew = false;
   try {
@@ -314,7 +318,10 @@ try {
 
   // 3. validateUsersResponse
   const validUsersList = validateUsersResponse({
-    users: [{ id: 1, username: 'u1', firstName: 'A' }, { id: 2, username: 'u2', firstName: 'B' }],
+    users: [
+      { id: 1, username: 'u1', firstName: 'A', lastName: 'One', age: 20, gender: 'male', email: 'a@example.com', phone: '111', image: 'https://example.com/a.png' },
+      { id: 2, username: 'u2', firstName: 'B', lastName: 'Two', age: 21, gender: 'female', email: 'b@example.com', phone: '222', image: 'https://example.com/b.png' },
+    ],
     total: 2,
     skip: 0,
     limit: 10,
@@ -325,8 +332,7 @@ try {
   let badUsersTotalThrew = false;
   try {
     validateUsersResponse({
-      users: [{ id: 1, username: 'u1' }],
-      total: -5,
+      users: [], total: -5, skip: 0, limit: 10,
     });
   } catch (e) {
     badUsersTotalThrew = true;
@@ -345,6 +351,11 @@ try {
   assertTrue(missingUsersThrew, 'Rejects missing users array');
   recordPass('validateUsersResponse rejects missing users array');
 
+  let missingPaginationThrew = false;
+  try { validateUsersResponse({ users: [], skip: 0, limit: 10 }); } catch (e) { missingPaginationThrew = e instanceof ApiError && e.code === 'MALFORMED_RESPONSE'; }
+  assertTrue(missingPaginationThrew, 'Rejects missing total instead of inferring it from array length');
+  recordPass('validateUsersResponse rejects missing pagination metadata');
+
   // 4. validateProduct
   const validProduct = validateProduct({
     id: 42,
@@ -355,12 +366,18 @@ try {
     discountPercentage: 7.17,
     rating: 4.94,
     stock: 99,
-    images: ['https://example.com/1.png'],
-    thumbnail: 'https://example.com/thumb.png',
+    images: ['https://example.com/1.png'], thumbnail: 'https://example.com/thumb.png',
   });
   assertEqual(validProduct.id, 42, 'Product ID valid');
   assertEqual(validProduct.title, 'Essence Mascara', 'Product title valid');
   recordPass('validateProduct accepts valid product record');
+  assertTrue(validProduct.tags === undefined && validProduct.dimensions === undefined && validProduct.reviews === undefined, 'Omitted optional product fields remain absent');
+  recordPass('validateProduct preserves omitted optional fields without fabricating values');
+
+  let invalidImageRejected = false;
+  try { validateProduct({ id: 42, title: 'Item', description: 'Description', category: 'beauty', price: 1, discountPercentage: 0, rating: 4, stock: 1, images: ['javascript:alert(1)'], thumbnail: 'https://example.com/item.png' }); } catch (e) { invalidImageRejected = e instanceof ApiError && e.code === 'MALFORMED_RESPONSE'; }
+  assertTrue(invalidImageRejected, 'Rejects non-HTTP(S) image URLs');
+  recordPass('validateProduct rejects unsafe image URL schemes');
 
   let missingProductTitleThrew = false;
   try {
@@ -374,7 +391,7 @@ try {
 
   let missingProductPriceThrew = false;
   try {
-    validateProduct({ id: 44, title: 'Item', category: 'beauty', price: -5 }); // negative price
+    validateProduct({ id: 44, title: 'Item', description: 'Item description', category: 'beauty', price: -5, discountPercentage: 0, rating: 4, stock: 1, images: ['https://example.com/item.png'], thumbnail: 'https://example.com/item.png' }); // negative price
   } catch (e) {
     missingProductPriceThrew = true;
     assertTrue(e instanceof ApiError && e.code === 'MALFORMED_RESPONSE', 'Rejects negative price');
@@ -384,7 +401,7 @@ try {
 
   let missingProductCategoryThrew = false;
   try {
-    validateProduct({ id: 45, title: 'Item', category: '', price: 15 }); // empty category
+    validateProduct({ id: 45, title: 'Item', description: 'Item description', category: '', price: 15, discountPercentage: 0, rating: 4, stock: 1, images: ['https://example.com/item.png'], thumbnail: 'https://example.com/item.png' }); // empty category
   } catch (e) {
     missingProductCategoryThrew = true;
     assertTrue(e instanceof ApiError && e.code === 'MALFORMED_RESPONSE', 'Rejects empty category');
@@ -394,7 +411,7 @@ try {
 
   let badProductThrew = false;
   try {
-    validateProduct({ id: -1, title: 'Negative ID', category: 'cat', price: 10 });
+    validateProduct({ id: -1, title: 'Negative ID', description: 'Item description', category: 'cat', price: 10, discountPercentage: 0, rating: 4, stock: 1, images: ['https://example.com/item.png'], thumbnail: 'https://example.com/item.png' });
   } catch {
     badProductThrew = true;
   }
@@ -403,7 +420,7 @@ try {
 
   // 5. validateProductsResponse
   const validProductsList = validateProductsResponse({
-    products: [{ id: 1, title: 'Item', category: 'groceries', price: 5 }],
+    products: [{ id: 1, title: 'Item', description: 'Item description', category: 'groceries', price: 5, discountPercentage: 0, rating: 4, stock: 3, images: ['https://example.com/item.png'], thumbnail: 'https://example.com/item.png' }],
     total: 1,
     skip: 0,
     limit: 12,
@@ -423,7 +440,7 @@ try {
     badProdsLimitThrew = true;
   }
   assertTrue(badProdsLimitThrew, 'Rejects non-positive limit');
-  recordPass('validateProductsResponse rejects non-positive limit');
+  recordPass('validateProductsResponse rejects negative limit');
 
   let missingProdsThrew = false;
   try {
@@ -437,10 +454,10 @@ try {
   // 6. validateCategories
   const objCats = validateCategories([{ slug: 'beauty', name: 'Beauty' }]);
   assertEqual(objCats[0].slug, 'beauty', 'Category object accepted');
-  const strCats = validateCategories(['beauty', 'fragrances']);
-  assertEqual(strCats[0].slug, 'beauty', 'Category string normalized');
-  assertEqual(strCats[1].name, 'Fragrances', 'Category string formatted');
-  recordPass('validateCategories normalizes string and object categories');
+  let malformedCategoryRejected = false;
+  try { validateCategories(['beauty']); } catch (e) { malformedCategoryRejected = e instanceof ApiError && e.code === 'MALFORMED_RESPONSE'; }
+  assertTrue(malformedCategoryRejected, 'Rejects category values outside the documented object shape');
+  recordPass('validateCategories accepts documented objects and rejects malformed values');
 
   // 7. isCancelledError
   const abortDom = new DOMException('The user aborted a request.', 'AbortError');
@@ -514,92 +531,65 @@ try {
   recordFail('S2-05 CategoryCache', err);
 }
 
+/*
+ * Removed test-only filtering and request-ID simulations. They duplicated the
+ * production algorithm without exercising fetchProducts() or the Zustand stores.
+ * Those behaviours are not reported as automated coverage by this suite.
+ */
+
 /* -------------------------------------------------------------
-   S2-06: COMBINED PRODUCT FILTERING & DETERMINISTIC PAGINATION
+   S2-CACHE: PAGINATED LIST RESPONSE CACHE
 ------------------------------------------------------------- */
-console.log('\n[S2-06] Testing Combined Product Filtering & Pagination Logic...');
+console.log('\n[S2-CACHE] Testing production list response cache...');
 try {
-  const dummyProducts = [
-    { id: 1, title: 'iPhone 14 Pro', description: 'Apple flagship', brand: 'Apple', category: 'smartphones', price: 999 },
-    { id: 2, title: 'Galaxy S23', description: 'Samsung phone', brand: 'Samsung', category: 'smartphones', price: 899 },
-    { id: 3, title: 'Pixel 7', description: 'Google smartphone', brand: 'Google', category: 'smartphones', price: 699 },
-    { id: 4, title: 'MacBook Air', description: 'Apple laptop', brand: 'Apple', category: 'laptops', price: 1199 },
-  ];
-
-  function filterAndPaginate(products, query, skip, limit) {
-    const q = query.trim().toLowerCase();
-    const filtered = products.filter((p) => {
-      const inTitle = p.title?.toLowerCase().includes(q);
-      const inDesc = p.description?.toLowerCase().includes(q);
-      const inBrand = p.brand?.toLowerCase().includes(q);
-      return inTitle || inDesc || inBrand;
-    });
-    return {
-      products: filtered.slice(skip, skip + limit),
-      total: filtered.length,
-      skip,
-      limit,
-    };
-  }
-
-  // Filter for 'apple' in smartphones (should only match iPhone 14 Pro, not MacBook)
-  const smartphoneItems = dummyProducts.filter((p) => p.category === 'smartphones');
-  const res = filterAndPaginate(smartphoneItems, 'apple', 0, 10);
-  assertEqual(res.total, 1, 'Only 1 smartphone matches Apple');
-  assertEqual(res.products[0].id, 1, 'Matches iPhone 14 Pro');
-  recordPass('Combined filter: Category isolation and brand search predicate match');
-
-  // Pagination on filtered results
-  // All 3 smartphones contain 'phone' (iPhone, Samsung phone, Google smartphone)
-  const resPage1 = filterAndPaginate(smartphoneItems, 'phone', 0, 2);
-  assertEqual(resPage1.total, 3, 'All 3 smartphones have phone keyword');
-  assertEqual(resPage1.products.length, 2, 'Page 1 limit 2 returns 2 products');
-  const resPage2 = filterAndPaginate(smartphoneItems, 'phone', 2, 2);
-  assertEqual(resPage2.products.length, 1, 'Page 2 limit 2 returns remaining 1 product');
-  assertTrue(resPage1.products[0].id !== resPage2.products[0].id, 'Pages return distinct products');
-  recordPass('Combined filter: Accurate pagination slice on filtered dataset');
+  const cache = new ListResponseCache({ ttlMs: 100, maxEntries: 2 });
+  const first = { products: [{ id: 1 }], total: 1 };
+  cache.set('page-1', first, 1000);
+  assertEqual(cache.get('page-1', 1050).total, 1, 'Cached list response is returned before TTL');
+  recordPass('List cache returns a fresh response');
+  assertEqual(cache.get('page-1', 1100), null, 'Expired cache entry is not returned');
+  recordPass('List cache expires entries at TTL boundary');
+  cache.set('a', { value: 'a' }, 2000);
+  cache.set('b', { value: 'b' }, 2000);
+  cache.get('a', 2001);
+  cache.set('c', { value: 'c' }, 2002);
+  assertEqual(cache.get('a', 2003).value, 'a', 'Recently accessed entry remains');
+  assertEqual(cache.get('b', 2003), null, 'Least recently used entry is evicted');
+  recordPass('List cache enforces bounded LRU eviction');
+  cache.clear();
+  assertEqual(cache.get('a', 2004), null, 'Clear removes all entries');
+  recordPass('List cache clear removes stored responses');
 } catch (err) {
-  recordFail('S2-06 Combined Product Filtering', err);
+  recordFail('S2 paginated list response cache', err);
 }
 
 /* -------------------------------------------------------------
-   S2-01 & S2-02: STALE RESPONSE & CANCELLATION RACE SIMULATION
+   SEARCH RELEVANCE: PRODUCTION RESULT RANKING
 ------------------------------------------------------------- */
-console.log('\n[S2-01 & S2-02] Testing Stale Response Prevention & Cancellation Race...');
+console.log('\n[SEARCH] Testing production search relevance ranking...');
 try {
-  // Simulate active request identity tracking
-  let activeRequestId = 0;
-  let selectedEntity = null;
+  const users = [
+    { name: 'Ethan Martinez', email: 'ethan.z@example.com' },
+    { name: 'Zoe Nicholson', email: 'zoe@example.com' },
+    { name: 'Mia Rodriguez', email: 'mia@example.com' },
+    { name: 'Zachary Chen', email: 'zachary@example.com' },
+  ];
+  const rankedUsers = rankSearchResults(users, 'z', (u) => u.name, (u) => u.email);
+  assertEqual(rankedUsers[0].name, 'Zoe Nicholson', 'Name prefix match ranks before substring-only matches');
+  assertEqual(rankedUsers[1].name, 'Zachary Chen', 'Other name prefix match is retained');
+  assertEqual(rankedUsers.length, users.length, 'Valid substring matches are not discarded');
 
-  async function mockDetailRequest(id, delayMs, assignedRequestId) {
-    await new Promise((r) => setTimeout(r, delayMs));
-    if (assignedRequestId === activeRequestId) {
-      selectedEntity = { id, name: `User #${id}` };
-    }
-  }
-
-  // Request 1 starts with 80ms delay
-  const req1Id = ++activeRequestId;
-  const p1 = mockDetailRequest(1, 80, req1Id);
-
-  // Request 2 starts 10ms later with 20ms delay (finishes first)
-  const req2Id = ++activeRequestId;
-  const p2 = mockDetailRequest(2, 20, req2Id);
-
-  await Promise.all([p1, p2]);
-
-  assertEqual(selectedEntity.id, 2, 'User #2 remains selected even after slow User #1 finishes later');
-  recordPass('Race condition prevention: Out-of-order response discarded');
-
-  // Cancel action simulation
-  activeRequestId++;
-  const cancelledReqId = activeRequestId;
-  activeRequestId++; // immediately superseded or unmounted
-  await mockDetailRequest(3, 10, cancelledReqId);
-  assertEqual(selectedEntity.id, 2, 'Superseded / cancelled request did not mutate state');
-  recordPass('Unmount / route change invalidates pending request identity');
+  const products = [
+    { title: 'Running Shoes', brand: 'North Star' },
+    { title: 'NN Compact Camera', brand: 'Acme' },
+    { title: 'Wireless Headphones', brand: 'NN Audio' },
+  ];
+  const rankedProducts = rankSearchResults(products, 'nn', (p) => p.title, (p) => p.brand);
+  assertEqual(rankedProducts[0].title, 'NN Compact Camera', 'Product title prefix ranks first');
+  assertEqual(rankedProducts.length, products.length, 'Other valid product matches remain available');
+  recordPass('Search ranking prioritizes title/name prefixes while retaining valid matches');
 } catch (err) {
-  recordFail('S2-01 & S2-02 Race condition simulation', err);
+  recordFail('Search relevance ranking', err);
 }
 
 console.log('\n========================================================');
@@ -611,3 +601,5 @@ if (hasFailed) {
 } else {
   process.exit(0);
 }
+
+

@@ -15,7 +15,6 @@ import ListItemText from '@mui/material/ListItemText';
 import Divider from '@mui/material/Divider';
 import MenuIcon from '@mui/icons-material/Menu';
 import LogoutIcon from '@mui/icons-material/Logout';
-import PersonOutlineIcon from '@mui/icons-material/PersonOutline';
 import CircularProgress from '@mui/material/CircularProgress';
 import Snackbar from '@mui/material/Snackbar';
 import Alert from '@mui/material/Alert';
@@ -166,18 +165,6 @@ export function Header({ drawerWidth, onDrawerToggle }: HeaderProps) {
                 @{user?.username || 'admin'}
               </Typography>
             </Box>
-            <Divider />
-            <MenuItem disabled sx={{ py: 1 }}>
-              <ListItemIcon>
-                <PersonOutlineIcon fontSize="small" />
-              </ListItemIcon>
-              <ListItemText
-                primary="Profile"
-                secondary="Sprint 2"
-                primaryTypographyProps={{ variant: 'body2' }}
-                secondaryTypographyProps={{ variant: 'caption' }}
-              />
-            </MenuItem>
             <Divider />
             <MenuItem onClick={handleLogout} disabled={isLoggingOut} sx={{ py: 1, color: 'error.main' }}>
               <ListItemIcon sx={{ color: 'error.main' }}>

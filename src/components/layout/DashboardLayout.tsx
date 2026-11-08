@@ -24,7 +24,7 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
   };
 
   return (
-    <Box sx={{ display: 'flex', minHeight: '100vh', bgcolor: 'background.default' }}>
+    <Box sx={{ display: 'flex', minHeight: '100vh', width: '100%', maxWidth: '100vw', overflowX: 'clip', bgcolor: 'background.default' }}>
       {/* Top Navigation Bar */}
       <Header drawerWidth={DRAWER_WIDTH} onDrawerToggle={handleDrawerToggle} />
 
@@ -40,8 +40,12 @@ export function DashboardLayout({ children }: DashboardLayoutProps) {
         component="main"
         sx={{
           flexGrow: 1,
-          p: { xs: 2, sm: 3, md: 4 },
-          width: { md: `calc(100% - ${DRAWER_WIDTH}px)` },
+          flexBasis: 0,
+          minWidth: 0,
+          width: 0,
+          maxWidth: '100%',
+          overflowX: 'clip',
+          p: { xs: 1, sm: 2.5, md: 3 },
           minHeight: '100vh',
           display: 'flex',
           flexDirection: 'column',

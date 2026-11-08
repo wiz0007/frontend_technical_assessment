@@ -34,12 +34,12 @@ export default function UsersPage() {
   const skip = useUsersStore((s) => s.skip);
   const searchQuery = useUsersStore((s) => s.searchQuery);
   const isLoading = useUsersStore((s) => s.isLoading);
-  const error = useUsersStore((s) => s.error);
+  const error = useUsersStore((s) => s.listError);
 
   const setSearchQuery = useUsersStore((s) => s.setSearchQuery);
   const setPagination = useUsersStore((s) => s.setPagination);
   const fetchUsers = useUsersStore((s) => s.fetchUsers);
-  const clearError = useUsersStore((s) => s.clearError);
+  const clearError = useUsersStore((s) => s.clearListError);
 
   const [localSearch, setLocalSearch] = useState(searchQuery);
   const [, startTransition] = useTransition();
@@ -80,51 +80,58 @@ export default function UsersPage() {
 
   return (
     <Box>
-      {/* Page Header */}
-      <Box mb={3} display="flex" flexDirection={{ xs: 'column', sm: 'row' }} justifyContent="space-between" alignItems={{ sm: 'center' }} gap={2}>
-        <Box>
-          <Typography variant="h4" component="h1" fontWeight={700}>
+      {/* Reserve the toolbar's space in the scrolling document; the toolbar itself is viewport-fixed. */}
+      <Box aria-hidden sx={{ height: { xs: 104, sm: 72, md: 76 }, flex: '0 0 auto' }} />
+      <Box
+        sx={{
+          position: 'fixed',
+          top: { xs: 56, sm: 72, md: 76 },
+          left: { xs: 8, sm: 20, md: 284 },
+          right: { xs: 8, sm: 20, md: 24 },
+          width: 'auto',
+          zIndex: 1090,
+          bgcolor: 'background.default',
+          pt: { xs: 0.5, sm: 0.5 },
+          pb: { xs: 1, sm: 1.5 },
+          boxSizing: 'border-box',
+        }}
+      >
+        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1.5, minWidth: 0 }}>
+          <Typography variant="h5" component="h1" fontWeight={700} sx={{ flex: 1, minWidth: 0 }}>
             Users Management
           </Typography>
-          <Typography variant="body2" color="text.secondary" mt={0.5}>
-            Browse, search and inspect user profiles from the DummyJSON service.
-          </Typography>
+          <TextField
+            size="small"
+            placeholder="Search users..."
+            value={localSearch}
+            onChange={(e) => setLocalSearch(e.target.value)}
+            sx={{
+              width: { xs: '100%', sm: 250, md: 320 },
+              display: { xs: 'none', sm: 'block' },
+              flex: { sm: '0 1 320px' },
+            }}
+            InputProps={{
+              startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" color="action" /></InputAdornment>,
+              endAdornment: localSearch ? <InputAdornment position="end"><IconButton size="small" onClick={handleClearSearch} edge="end" aria-label="Clear user search"><ClearIcon fontSize="small" /></IconButton></InputAdornment> : null,
+            }}
+          />
+          <IconButton aria-label="Refresh users" onClick={() => fetchUsers(true)} disabled={isLoading} color="primary">
+            <RefreshIcon />
+          </IconButton>
         </Box>
-        <Button
-          variant="outlined"
-          startIcon={<RefreshIcon />}
-          onClick={() => fetchUsers()}
-          disabled={isLoading}
-          size="small"
-        >
-          Refresh
-        </Button>
-      </Box>
-
-      {/* Search Bar */}
-      <Card elevation={0} sx={{ p: 2, mb: 3 }}>
         <TextField
           fullWidth
           size="small"
           placeholder="Search users by name, username, or email..."
           value={localSearch}
           onChange={(e) => setLocalSearch(e.target.value)}
+          sx={{ display: { xs: 'block', sm: 'none' }, mt: 1 }}
           InputProps={{
-            startAdornment: (
-              <InputAdornment position="start">
-                <SearchIcon fontSize="small" color="action" />
-              </InputAdornment>
-            ),
-            endAdornment: localSearch ? (
-              <InputAdornment position="end">
-                <IconButton size="small" onClick={handleClearSearch} edge="end">
-                  <ClearIcon fontSize="small" />
-                </IconButton>
-              </InputAdornment>
-            ) : null,
+            startAdornment: <InputAdornment position="start"><SearchIcon fontSize="small" color="action" /></InputAdornment>,
+            endAdornment: localSearch ? <InputAdornment position="end"><IconButton size="small" onClick={handleClearSearch} edge="end" aria-label="Clear user search"><ClearIcon fontSize="small" /></IconButton></InputAdornment> : null,
           }}
         />
-      </Card>
+      </Box>
 
       {/* Error Message with Retry */}
       {error && (
@@ -140,8 +147,19 @@ export default function UsersPage() {
 
       {/* Users Data Table */}
       <Card elevation={0}>
-        <TableContainer sx={{ minHeight: 380 }}>
-          <Table sx={{ minWidth: 650 }} aria-label="users table">
+        <TableContainer
+          sx={{
+            width: '100%',
+            maxWidth: '100%',
+            minWidth: 0,
+            minHeight: 380,
+            overflowX: 'auto',
+            overflowY: 'hidden',
+            WebkitOverflowScrolling: 'touch',
+            overscrollBehaviorX: 'contain',
+          }}
+        >
+          <Table sx={{ minWidth: 900, tableLayout: 'auto' }} aria-label="users table">
             <TableHead>
               <TableRow sx={{ bgcolor: 'action.hover' }}>
                 <TableCell sx={{ fontWeight: 600 }}>User</TableCell>
@@ -271,6 +289,20 @@ export default function UsersPage() {
           onRowsPerPageChange={handleChangeRowsPerPage}
           labelRowsPerPage="Users per page:"
           disabled={isLoading}
+          sx={{
+            width: '100%',
+            maxWidth: '100%',
+            overflowX: 'hidden',
+            '& .MuiTablePagination-toolbar': {
+              flexWrap: 'wrap',
+              justifyContent: { xs: 'center', sm: 'flex-end' },
+              minHeight: { xs: 72, sm: 52 },
+              px: { xs: 1, sm: 2 },
+            },
+            '& .MuiTablePagination-selectLabel, & .MuiTablePagination-displayedRows': {
+              my: { xs: 0.5, sm: 2 },
+            },
+          }}
         />
       </Card>
     </Box>

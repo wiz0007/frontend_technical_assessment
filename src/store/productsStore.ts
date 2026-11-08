@@ -1,194 +1,112 @@
 import { create } from 'zustand';
-import { ProductsStore } from '@/types/products';
-import {
-  fetchProducts as apiFetchProducts,
-  fetchCategories as apiFetchCategories,
-  fetchProductById as apiFetchProductById,
-  isCancelledError,
-} from '@/lib/api';
+import type { ProductsStore } from '@/types/products';
+import { fetchProducts as apiFetchProducts, fetchCategories as apiFetchCategories, fetchProductById as apiFetchProductById, isCancelledError } from '@/lib/api';
+import { ListResponseCache } from '@/lib/list-cache';
+import type { ProductsResponse } from '@/types/products';
+import { rankSearchResults } from '@/lib/search-ranking';
 
-let activeProductsAbortController: AbortController | null = null;
-let activeProductsRequestId = 0;
+const productsListCache = new ListResponseCache<ProductsResponse>({ ttlMs: 60_000, maxEntries: 100 });
+const productsCacheKey = (limit: number, skip: number, search: string, category: string) => `${limit}:${skip}:${search.trim().toLowerCase()}:${category.trim().toLowerCase()}`;
 
-let activeProductDetailAbortController: AbortController | null = null;
-let activeProductDetailRequestId = 0;
-
-let activeCategoriesAbortController: AbortController | null = null;
-let activeCategoriesRequestId = 0;
+let listController: AbortController | null = null;
+let listRequestId = 0;
+let detailController: AbortController | null = null;
+let detailRequestId = 0;
+let categoryController: AbortController | null = null;
+let categoryRequestId = 0;
 
 export const useProductsStore = create<ProductsStore>((set, get) => ({
-  products: [],
-  categories: [],
-  selectedProduct: null,
-  total: 0,
-  limit: 12, // 12 items fits well into responsive 2, 3, or 4-column grids
-  skip: 0,
-  searchQuery: '',
-  selectedCategory: '',
-  isLoading: false,
-  isLoadingCategories: false,
-  isLoadingDetail: false,
-  error: null,
-  categoryError: null,
-
-  setSearchQuery: (query: string) => {
-    set({ searchQuery: query, skip: 0 });
+  products: [], categories: [], selectedProduct: null, total: 0, limit: 10, skip: 0,
+  searchQuery: '', selectedCategory: '', isLoading: false, isLoadingCategories: false,
+  isLoadingDetail: false, listError: null, detailError: null, categoryError: null,
+  setSearchQuery: (query) => set({ searchQuery: query, skip: 0 }),
+  setSelectedCategory: (category) => set({ selectedCategory: category, skip: 0 }),
+  setPagination: (page, newLimit) => {
+    const limit = newLimit ?? get().limit;
+    set({ skip: Math.max(0, (page - 1) * limit), limit });
   },
-
-  setSelectedCategory: (category: string) => {
-    set({ selectedCategory: category, skip: 0 });
-  },
-
-  setPagination: (page: number, newLimit?: number) => {
-    const currentLimit = newLimit ?? get().limit;
-    const newSkip = Math.max(0, (page - 1) * currentLimit);
-    set({ skip: newSkip, limit: currentLimit });
-  },
-
   fetchCategories: async (force = false) => {
-    if (get().categories.length > 0 && !force) return; // avoid duplicate calls unless forced
-
-    if (activeCategoriesAbortController) {
-      activeCategoriesAbortController.abort();
-    }
-    const controller = new AbortController();
-    activeCategoriesAbortController = controller;
-
-    const requestId = ++activeCategoriesRequestId;
+    if (get().categories.length > 0 && !force) return;
+    categoryController?.abort();
+    const controller = new AbortController(); categoryController = controller;
+    const requestId = ++categoryRequestId;
     set({ isLoadingCategories: true, categoryError: null });
-
     try {
       const categories = await apiFetchCategories({ signal: controller.signal });
-      if (requestId === activeCategoriesRequestId) {
-        set({ categories, isLoadingCategories: false, categoryError: null });
-      }
-    } catch (err: unknown) {
-      if (isCancelledError(err)) {
-        return;
-      }
-      if (requestId === activeCategoriesRequestId) {
-        const message =
-          err instanceof Error
-            ? err.message
-            : 'Failed to load product categories.';
-        set({ isLoadingCategories: false, categoryError: message });
-      }
+      if (requestId !== categoryRequestId) return;
+      set({ categories, isLoadingCategories: false, categoryError: null });
+    } catch (err) {
+      if (requestId !== categoryRequestId) return;
+      if (isCancelledError(err)) { set({ isLoadingCategories: false }); return; }
+      set({ categoryError: err instanceof Error ? err.message : 'Failed to load categories.', isLoadingCategories: false });
+    } finally {
+      if (requestId === categoryRequestId) categoryController = null;
     }
   },
-
   cancelCategoriesRequest: () => {
-    if (activeCategoriesAbortController) {
-      activeCategoriesAbortController.abort();
-      activeCategoriesAbortController = null;
-    }
-    activeCategoriesRequestId++;
+    categoryRequestId++; categoryController?.abort(); categoryController = null;
     set({ isLoadingCategories: false });
   },
-
   clearCategoryError: () => set({ categoryError: null }),
-
-  fetchProducts: async () => {
-    if (activeProductsAbortController) {
-      activeProductsAbortController.abort();
-    }
-    const controller = new AbortController();
-    activeProductsAbortController = controller;
-
-    const requestId = ++activeProductsRequestId;
+  fetchProducts: async (force = false) => {
+    listController?.abort();
+    const controller = new AbortController(); listController = controller;
+    const requestId = ++listRequestId;
     const { limit, skip, searchQuery, selectedCategory } = get();
-
-    set({ isLoading: true, error: null });
-
-    try {
-      const response = await apiFetchProducts(
-        {
-          limit,
-          skip,
-          search: searchQuery,
-          category: selectedCategory,
-        },
-        { signal: controller.signal }
-      );
-
-      // Avoid race conditions: only update if this is the latest request
-      if (requestId === activeProductsRequestId) {
-        set({
-          products: response.products,
-          total: response.total,
-          isLoading: false,
-          error: null,
-        });
-      }
-    } catch (err: unknown) {
-      if (isCancelledError(err)) {
+    const cacheKey = productsCacheKey(limit, skip, searchQuery, selectedCategory);
+    if (!force) {
+      const cached = productsListCache.get(cacheKey);
+      if (cached) {
+        set({ products: cached.products, total: cached.total, isLoading: false, listError: null });
+        listController = null;
         return;
       }
-      if (requestId === activeProductsRequestId) {
-        const message =
-          err instanceof Error
-            ? err.message
-            : 'Unable to load products. Please check your connection and try again.';
-        set({
-          error: message,
-          isLoading: false,
-        });
-      }
+    }
+    set({ isLoading: true, listError: null });
+    try {
+      const response = await apiFetchProducts({ limit, skip, search: searchQuery, category: selectedCategory }, { signal: controller.signal });
+      if (requestId !== listRequestId) return;
+      const rankedProducts = searchQuery
+        ? rankSearchResults(response.products, searchQuery,
+            (product) => product.title,
+            (product) => `${product.brand ?? ''} ${product.description}`)
+        : response.products;
+      const rankedResponse = { ...response, products: rankedProducts };
+      productsListCache.set(cacheKey, rankedResponse);
+      set({ products: rankedResponse.products, total: rankedResponse.total, isLoading: false, listError: null });
+    } catch (err) {
+      if (requestId !== listRequestId) return;
+      if (isCancelledError(err)) { set({ isLoading: false }); return; }
+      set({ listError: err instanceof Error ? err.message : 'Unable to load products. Please try again.', isLoading: false });
+    } finally {
+      if (requestId === listRequestId) listController = null;
     }
   },
-
-  fetchProductById: async (id: number | string) => {
-    if (activeProductDetailAbortController) {
-      activeProductDetailAbortController.abort();
-    }
-    const controller = new AbortController();
-    activeProductDetailAbortController = controller;
-
-    const requestId = ++activeProductDetailRequestId;
-    set({ isLoadingDetail: true, error: null, selectedProduct: null });
-
+  fetchProductById: async (id) => {
+    detailController?.abort();
+    const controller = new AbortController(); detailController = controller;
+    const requestId = ++detailRequestId;
+    set({ isLoadingDetail: true, detailError: null, selectedProduct: null });
     try {
       const product = await apiFetchProductById(id, { signal: controller.signal });
-      if (requestId === activeProductDetailRequestId) {
-        set({
-          selectedProduct: product,
-          isLoadingDetail: false,
-          error: null,
-        });
-      }
-    } catch (err: unknown) {
-      if (isCancelledError(err)) {
-        return;
-      }
-      if (requestId === activeProductDetailRequestId) {
-        const message =
-          err instanceof Error
-            ? err.message
-            : `Failed to load details for product #${id}.`;
-        set({
-          error: message,
-          isLoadingDetail: false,
-        });
-      }
+      if (requestId !== detailRequestId) return;
+      set({ selectedProduct: product, isLoadingDetail: false, detailError: null });
+    } catch (err) {
+      if (requestId !== detailRequestId) return;
+      if (isCancelledError(err)) { set({ isLoadingDetail: false }); return; }
+      set({ detailError: err instanceof Error ? err.message : `Failed to load product #${id}.`, isLoadingDetail: false });
+    } finally {
+      if (requestId === detailRequestId) detailController = null;
     }
   },
-
   cancelProductDetailRequest: () => {
-    if (activeProductDetailAbortController) {
-      activeProductDetailAbortController.abort();
-      activeProductDetailAbortController = null;
-    }
-    activeProductDetailRequestId++;
+    detailRequestId++; detailController?.abort(); detailController = null;
     set({ isLoadingDetail: false });
   },
-
   clearSelectedProduct: () => {
-    if (activeProductDetailAbortController) {
-      activeProductDetailAbortController.abort();
-      activeProductDetailAbortController = null;
-    }
-    activeProductDetailRequestId++;
-    set({ selectedProduct: null, isLoadingDetail: false });
+    detailRequestId++; detailController?.abort(); detailController = null;
+    set({ selectedProduct: null, isLoadingDetail: false, detailError: null });
   },
-
-  clearError: () => set({ error: null }),
+  clearListError: () => set({ listError: null }),
+  clearDetailError: () => set({ detailError: null }),
 }));
